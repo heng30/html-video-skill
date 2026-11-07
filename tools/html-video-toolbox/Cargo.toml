@@ -35,6 +35,7 @@ clap = { version = "4.6", default-features = false, features = [
 burn = { version = "0.22", default-features = false, features = [
   "std",
   "flex",
+  "wgpu",
 ] }
 serde = { version = "1.0", default-features = false, features = [
   "std",

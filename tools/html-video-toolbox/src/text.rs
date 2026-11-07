@@ -8,7 +8,7 @@ pub struct Sentence {
     pub text: String,
 }
 
-/// 非空行是一句，空行结束当前段落。
+/// 非空正文行是一句，空行结束当前段落；`##` 标题行不进语音与字幕。
 pub fn read_sentences(path: &Path) -> Result<Vec<Sentence>> {
     let content =
         std::fs::read_to_string(path).with_context(|| format!("cannot read {}", path.display()))?;
@@ -22,6 +22,9 @@ pub fn read_sentences(path: &Path) -> Result<Vec<Sentence>> {
                 paragraph += 1;
                 seen_text = false;
             }
+            continue;
+        }
+        if line.starts_with("## ") {
             continue;
         }
         seen_text = true;

@@ -32,6 +32,9 @@ pub struct Args {
     /// process only these sentence indexes, comma separated
     #[arg(long)]
     pub only: Option<String>,
+    /// synthesize on the wgpu GPU backend instead of the CPU (flex) backend
+    #[arg(long)]
+    pub gpu: bool,
 }
 
 fn parse_only(only: Option<&str>) -> Result<Option<Vec<usize>>> {
@@ -77,12 +80,18 @@ fn synthesize(
     wanted: &[usize],
 ) -> Result<()> {
     eprintln!(
-        "loading model {} ({} sentences to synthesize)",
+        "loading model {} on {} ({} sentences to synthesize)",
         model_dir.display(),
+        if args.gpu { "wgpu/gpu" } else { "flex/cpu" },
         wanted.len()
     );
-    let device = burn::tensor::Device::flex();
-    let model = VoxCPM::from_local(model_dir, &device).map_err(|e| anyhow!("model load failed: {e}"))?;
+    let device = if args.gpu {
+        burn::tensor::Device::wgpu(burn::tensor::DeviceKind::DefaultDevice)
+    } else {
+        burn::tensor::Device::flex()
+    };
+    let model =
+        VoxCPM::from_local(model_dir, &device).map_err(|e| anyhow!("model load failed: {e}"))?;
     let sample_rate = model.sample_rate() as u32;
     let options = GenerateOptions {
         cfg_value: args.cfg,
@@ -95,7 +104,11 @@ fn synthesize(
     };
     for (done, index) in wanted.iter().enumerate() {
         let sentence = &lines[index - 1].text;
-        eprintln!("[{}/{}] sentence {index}: {sentence}", done + 1, wanted.len());
+        eprintln!(
+            "[{}/{}] sentence {index}: {sentence}",
+            done + 1,
+            wanted.len()
+        );
         let samples = model
             .generate(sentence, options.clone())
             .map_err(|e| anyhow!("sentence {index} synthesis failed: {e}"))?;
@@ -145,6 +158,12 @@ fn read_pcm16(path: &Path) -> Result<(Vec<i16>, u32)> {
     Ok((samples, spec.sample_rate))
 }
 
+/// 字幕行尾去掉句读标点，否则拖尾标点在屏幕上很突兀。
+fn strip_tail_punct(text: &str) -> &str {
+    let trimmed = text.trim_end_matches(|c: char| "。，；：、！？!?,.;:".contains(c));
+    trimmed.trim_end_matches(['—', '-', '）', ')'])
+}
+
 fn timestamp(ms: u64) -> String {
     let hours = ms / 3_600_000;
     let minutes = (ms % 3_600_000) / 60_000;
@@ -159,7 +178,9 @@ pub fn run(args: Args) -> Result<()> {
         .canonicalize()
         .map_err(|_| anyhow!("directory not found: {}", args.dir.display()))?;
     if !review_passed(&root)? {
-        bail!("review-speech not done: check speech.md manually first, then run state done <dir> review-speech");
+        bail!(
+            "review-speech not done: check speech.md manually first, then run state done <dir> review-speech"
+        );
     }
     let speech_path = root.join("speech.md");
     let tts_path = root.join("speech.tts.md");
@@ -252,7 +273,10 @@ pub fn run(args: Args) -> Result<()> {
         let trimmed = voice_dir.join(format!("sent-{index:04}.wav"));
         let (samples, rate) = read_pcm16(&trimmed)?;
         if rate != SAMPLE_RATE {
-            bail!("trim output sample rate mismatch: {} ({rate})", trimmed.display());
+            bail!(
+                "trim output sample rate mismatch: {} ({rate})",
+                trimmed.display()
+            );
         }
         for sample in &samples {
             writer.write_sample(*sample)?;
@@ -311,7 +335,7 @@ pub fn run(args: Args) -> Result<()> {
             entry["index"],
             timestamp(entry["start_ms"].as_u64().unwrap_or(0)),
             timestamp(entry["end_ms"].as_u64().unwrap_or(0)),
-            entry["text"].as_str().unwrap_or("")
+            strip_tail_punct(entry["text"].as_str().unwrap_or(""))
         ));
     }
     let srt_path = root.join("subs/final.srt");

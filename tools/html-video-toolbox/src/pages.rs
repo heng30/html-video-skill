@@ -21,6 +21,8 @@ fn paragraph_counts(path: &Path) -> Result<Vec<usize>> {
                 counts.push(current);
                 current = 0;
             }
+        } else if line.trim().starts_with("## ") {
+            // 标题行不是句子，不计数
         } else {
             current += 1;
         }

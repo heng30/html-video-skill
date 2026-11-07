@@ -1,10 +1,10 @@
 ---
 name: html-video
-description: 文章 URL → 粗剪解说视频。抓正文与配图、组件搭 slides、逐页演讲稿、分句、克隆配音、裁剪静音、合成不带字幕的 MP4。两个人审断点与断点续跑。触发：文章转视频、解说视频、配音视频、URL 转视频、html video。
+description: 文章 URL → 粗剪解说视频。抓正文与配图、组件搭 slides、逐页演讲稿、分句、克隆配音、裁剪静音、合成不带字幕的 MP4。两个人审断点与断点续跑。
 disable-model-invocation: true
 ---
 
-# article-video：文章 URL → 解说视频
+# html-video：文章 URL → 解说视频
 
 一条流水线，十步，两个人工断点。所有中间产物落盘，任何一步失败都能从断点续跑。整条流水线由一个工具包办：`$HV`（`html-video-toolbox`）的 `screenshot` / `state` / `check` / `pages` / `tts` / `compose` / `verify` 子命令。
 
@@ -51,7 +51,9 @@ disable-model-invocation: true
 └── progress.json          # 断点状态
 ```
 
-`$SKILL` = 本文件所在目录；`$HV` = `$SKILL/tools/html-video-toolbox/target/release/html-video-toolbox`。`<slug>` 是文章目录路径，工具在任意目录都能执行；`mkdir` / `curl` 这类命令在文章目录里执行。
+`$SKILL` = 本文件所在目录。`<slug>` 是文章目录路径，工具在任意目录都能执行；`mkdir` / `curl` 这类命令在文章目录里执行。
+
+`$HV` 解析顺序（每次开工先用 `command -v html-video-toolbox` 确定一次）：系统 PATH 里的 `html-video-toolbox` → `$SKILL/tools/html-video-toolbox/target/release/html-video-toolbox` → 都没有才进依赖里的构建步骤。
 
 ## 依赖
 
@@ -65,7 +67,7 @@ ls $SKILL/assets/cloned-voice.wav
 ls $HV
 ```
 
-- 工具不在就构建（首次约 10 分钟，含 burn/wgpu）：
+- 工具不在 "$HV" 解析顺序的任何位置时才构建（首次约 10 分钟，含 burn/wgpu）：
 
   ```bash
   cd $SKILL/tools/html-video-toolbox && cargo build --release
@@ -106,7 +108,7 @@ mkdir -p <slug>
 
 1. 用 `fetch_content` 抓 URL，得到 markdown。
 2. `article.md` 逐字保留原文正文（**不翻译**）：删掉大标题、导航、作者卡片、推荐阅读、版权声明、评论区；保留段落顺序与空行分段。
-3. `title.md` 写一行标题（可译成中文）；`url` 写一行 URL。
+3. `title.md` 写一行标题，除了特定名词，必须译成中文；`url` 写一行 URL。
 4. 正文里的图片按出现顺序下载到 `images/`：
 
 ```bash
@@ -114,6 +116,7 @@ mkdir -p images
 curl -L --fail -A 'Mozilla/5.0' -o images/img-01.jpg '<图片 URL>'
 ```
 
+如果直连现在失败，可以尝试使用 `Socks5` 代理重新下载一次，代理地址：`127.0.0.1:1084`
 403/404 的图跳过，不要为了一张图卡住；`article.md` 里不要留图片语法。
 
 5. `$HV state done <slug> fetch`
@@ -138,6 +141,8 @@ $HV screenshot <slug>/index.html -o <slug>/slides
 - 产物 `slides/slide-01.png …`，数量与页数一致；只截部分页用 `-n 1-3`。
 - 浏览器路径：`--chrome-path /path/to/chromium` 或 `CHROME_PATH`。
 
+**截图后必须逐张自查**：用 `read` 打开 `slides/slide-*.png` 每一张，确认 ① `<span class="hl">` 高亮颜色正常显示（不是黑/白/透明、同一页不混用两种高亮色）；② 布局没塌——无文字溢出、无重叠、无被裁切、无大片空白、图片没变形、标题与正文没贴边。任何一张不合格就回改 `index.html`，重跑 `$HV screenshot`，直到全部通过。不许凭记忆认为「应该没问题」。
+
 这一步**不写** `pages.json`，它要等分句完成（文件名零填充由 `pages` / `compose` 统一处理）。
 
 `$HV state done <slug> slides`
@@ -147,7 +152,7 @@ $HV screenshot <slug>/index.html -o <slug>/slides
 按 slides 的页数写 `script.md`：一页一段演讲稿，段前用 `## NN 标题` 标记。
 
 - `##` 标题数量必须等于 `slides/slide-*.png` 数量，顺序与页面一致
-- 每页一段口播稿，可以多句；不写分点、不写舞台提示
+- 每页一段口播稿，可以多句；不写分点、不写舞台提示；**不要使用破折号**
 - 内容来自 `article.md`：原文是外文就用中文写，数字保留阿拉伯形式
 - 不要跨页讲同一件事；一页只承担一个信息
 - 纯封面页也要写一句开场白，不要留空
@@ -178,7 +183,7 @@ $HV check script <slug>
 - 有没有漏页、重复、跨页
 - 事实、数字、语气是否要改
 
-用户确认后：
+**用户确认后，先重新读取 `script.md` 最新内容**（用户可能直接改过文件），再：
 
 ```bash
 $HV state done <slug> review-script
@@ -189,7 +194,8 @@ $HV state done <slug> review-script
 把 `script.md` 逐页分句，写 `speech.md`：
 
 - 每页一段，段间空行；段落数必须等于 `script.md` 的页数
-- 一行一句；按语义分句，长句保持完整，不强制字数上限
+- 一行一句；`，`、`；`、`：`、`。`、`！`、`？` 皆是断点（顿号不是，保留短语连读）；每行以标点结尾
+- 每行内容只增断行、不改字，拼接后与 `script.md` 对应段逐字一致；不强制字数上限
 - 不让分句跨页；数字保持阿拉伯形式；句末标点保留
 - 不要产生只含标点的句子
 
@@ -221,7 +227,7 @@ $HV check speech <slug>
 - 译文是否准确、有没有漏译或错译
 - 数字是否保留阿拉伯数字、`pages.json` 的页边界是否合理
 
-用户确认后：
+**用户确认后，先重新读取 `speech.md` 最新内容**（用户可能直接改过；若改了，重跑 `$HV pages` 与 `check speech`），再：
 
 ```bash
 $HV state done <slug> review-speech
@@ -234,6 +240,8 @@ $HV state done <slug> review-speech
 把 `speech.md` 逐行转成口语稿 `speech.tts.md`：
 
 - 行数、顺序、段落空行与 `speech.md` **完全一致**
+- `##` 标题行不进语音、不进字幕（工具按行数对齐时自动跳过），保留原样即可，不需数字转换
+- 每行去掉行尾句读标点（`。，；：、！？`），TTS 读起来自然；顿号在行中间照常保留
 - 阿拉伯数字、年份、小数、百分比、金额、单位、版本号改成中文读法
 - 示例：`2024 年` → `二零二四年`；`12.5%` → `百分之十二点五`；`3 km` → `三公里`；`1.5 亿` → `一点五亿`；`GPT-4` → `GPT 四`
 - 不改语义、不增删内容；拿不准的按最自然的读法写
@@ -251,10 +259,10 @@ $HV check tts-text <slug>
 ## 7 · tts
 
 ```bash
-$HV tts <slug> --voice $SKILL/assets/cloned-voice.wav
+$HV tts <slug> --gui --voice $SKILL/assets/cloned-voice.wav
 ```
 
-可选：`--model-dir <dir>`、`--force`（全量重合成）、`--only 1,3,5`（只处理这几句）、`--cfg` / `--steps` / `--max-len`（生成参数）。工具一次加载模型，逐句合成，裁剪每句首尾静默（句首 ≤50ms、句尾 ≤120ms，-40dB），按句间 150ms、段间 400ms 拼接，写出 `voice/full.wav`、`voice/timeline.json`、`voice/manifest.json`、`subs/final.srt`。
+可选：`--model-dir <dir>`、`--gpu`（用 wgpu GPU 后端合成，不加则默认 CPU `flex` 后端）、`--force`（全量重合成）、`--only 1,3,5`（只处理这几句）、`--cfg` / `--steps` / `--max-len`（生成参数）。工具一次加载模型，逐句合成，裁剪每句首尾静默（句首 ≤50ms、句尾 ≤120ms，-40dB），按句间 150ms、段间 400ms 拼接，写出 `voice/full.wav`、`voice/timeline.json`、`voice/manifest.json`、`subs/final.srt`。
 
 - 音色缺失会直接报错停下，补好 `assets/cloned-voice.wav` 后重跑同一条命令（或设 `VOICE_CLONE_WAV`）。
 - 断点粒度是句子：`speech.tts.md` 某行不变就跳过该句；只改了几句就只重合成那几句。
@@ -285,12 +293,13 @@ $HV verify <slug>
 ## 硬规则
 
 - `script.md` 一页一段，页数 = slides 数；`speech.md` 段落数 = `script.md` 页数。
-- 字幕文本永远来自 `speech.md`（中文、阿拉伯数字）；`speech.tts.md` 只给 TTS 读，必须保留供排错。
+- 字幕文本永远来自 `speech.md`（中文、阿拉伯数字），行尾句读标点由 `tts` 自动去掉（屏幕上拖尾标点很突兀）；`speech.tts.md` 只给 TTS 读，必须保留供排错。
 - `article.md` 保留原文语言，不翻译；翻译只发生在 `speech.md`。
 - 不改原文、不编内容；分句校验不过就不许进配音。
 - 页时间只能落在句边界上，不按字数估算。
 - 成片不烧字幕；`final.srt` 是给用户后期用的，不要在 ffmpeg 里加 `subtitles`。
 - 截图只走 `$HV screenshot`，不许换浏览器、不许用 playwright 兜底。
+- 截图后必须逐张看图确认高亮颜色与布局；有不合格的就改 `index.html` 重截，不许直接进 `script`。
 - 这是粗剪：允许句子偏长、允许停顿不完美，精修交给剪辑器。
 - 任何一步失败先看 `$HV state status`，不要从头重跑。
 
