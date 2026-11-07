@@ -20,7 +20,7 @@ disable-model-invocation: true
 | `review-script` | 无（人工断点） | 人 |
 | `speech` | `speech.md`、`slides/pages.json` | agent（分句）+ `pages` |
 | `review-speech` | 无（人工断点） | 人 |
-| `tts-text` | `speech.tts.md` | agent（LLM 转口语稿） |
+| `tts-text` | `speech.tts.md` | agent（LLM 转口语稿 + 数字读法二次检查） |
 | `tts` | `voice/`、`subs/final.srt`、`voice/asr.json` | `tts` + `asr`（逐句回听校验） |
 | `compose` | `final.mp4`、`final.srt` | `compose`（ffmpeg） |
 | `verify` | 无（验收报告） | `verify` |
@@ -38,7 +38,7 @@ disable-model-invocation: true
 ├── slides/                # slide-01.png … 1920×1080
 │   └── pages.json         # 句子 → 页 映射
 ├── speech.md              # 分句后的中文口播稿，每页一段，阿拉伯数字
-├── speech.tts.md          # 配音稿，数字转中文读法，行与 speech.md 一一对应
+├── speech.tts.md          # 配音稿，数字转中文读法，行与 speech.md 一一对应（agent 自己二次检查读法，不入人工审）
 ├── voice/
 │   ├── raw/               # 模型原始输出 sent-0001.wav
 │   ├── sent-0001.wav      # 裁剪静默后
@@ -248,8 +248,25 @@ $HV state done <slug> review-speech
 - `##` 标题行不进语音、不进字幕（工具按行数对齐时自动跳过），保留原样即可，不需数字转换
 - 每行去掉行尾句读标点（`。，；：、！？`），TTS 读起来自然；顿号在行中间照常保留
 - 阿拉伯数字、年份、小数、百分比、金额、单位、版本号改成中文读法
-- 示例：`2024 年` → `二零二四年`；`12.5%` → `百分之十二点五`；`3 km` → `三公里`；`1.5 亿` → `一点五亿`；`GPT-4` → `GPT 四`
 - 不改语义、不增删内容；拿不准的按最自然的读法写
+
+**先定读法，再动笔。** 同一个数字有两种读法，先看它在句子里指什么：
+
+| 数字是 | 读法 | 例子 |
+|---|---|---|
+| 数量 / 金额 / 时长 / 比例 | **按数值**：二十、一百零五、三千五百万 | `20 人` → `二十人`；`105 次` → `一百零五次`；`3000 万` → `三千万` |
+| 年份 / 编号 / 门牌 / 页码 / 型号 | **逐位**：二零二四、一九九零、一零五、GPT 四 | `2024 年` → `二零二四年`；`1990 年代` → `一九九零年代`；`GPT-4` → `GPT 四` |
+| 小数 | 点前按数值、点后逐位 | `3.14` → `三点一四`；`10.5 亿` → `十点五亿` |
+| 百分比 / 分数 | `%` → 百分之 + 数值；`a/b` → b 分之 a | `12.5%` → `百分之十二点五`；`1/3` → `三分之一` |
+| 序数 | 第 + 读法（用二，不用两） | `第 2 章` → `第二章`；`第 20 条` → `第二十条` |
+| 量词前的 2 | 用「两」 | `2 个人` → `两个人`；`2 年` → `两年` |
+
+最典型的两个错：`20` 写成 `二零`（该是 `二十`）、`105` 写成 `一百五` 或 `一零五`（该是 `一百零五`）；另外别丢单位：`3000 万` 是 `三千万`，`3 km` 是 `三公里`。
+
+**写完必须做一次二次检查（这一条不能省）：** 把 `speech.md` 和 `speech.tts.md` 并排逐行读，**只看带数字的行**，每处数字在心里过三问：① 它在这里是数量、序数还是编号/年份，读法选对了吗？② 位数丢了吗（有零位没读「零」）？③ 量词、单位、万/亿还挂着吗？
+
+- 把改过的数字逐条列出来（原文 → 读法 → 类型），有疑点的句子单独重写这一行，**不要整篇重写**（会破坏与 `speech.md` 的行对齐）。
+- 只做了阿拉伯数字清理、没做二次检查，视为这一步没做完。工具只查得出「还有阿拉伯数字」，查不出「二零」写错。
 
 校验：
 
@@ -257,7 +274,7 @@ $HV state done <slug> review-speech
 $HV check tts-text <slug>
 ```
 
-`digits_left` 必须为空，`paragraph_mismatch` 必须为空。
+`digits_left` 必须为空，`paragraph_mismatch` 必须为空；改过数字后重跑一次。
 
 `$HV state done <slug> tts-text`
 
@@ -321,6 +338,7 @@ $HV verify <slug>
 - `script.md` 一页一段，页数 = slides 数；`speech.md` 段落数 = `script.md` 页数。
 - 字幕文本永远来自 `speech.md`（中文、阿拉伯数字），行尾句读标点由 `tts` 自动去掉（屏幕上拖尾标点很突兀）；`speech.tts.md` 只给 TTS 读，必须保留供排错。
 - `article.md` 保留原文语言，不翻译；翻译只发生在 `speech.md`。
+- 数字读法分两类：数量按数值（二十），年份/编号逐位（二零二四）；`speech.tts.md` 写完必须做二次检查，按数字类型逐处核对读法。
 - 不改原文、不编内容；分句校验不过就不许进配音。
 - 页时间只能落在句边界上，不按字数估算。
 - 成片不烧字幕；`final.srt` 是给用户后期用的，不要在 ffmpeg 里加 `subtitles`。
@@ -346,6 +364,7 @@ $HV verify <slug>
 | `分句拼不回 article.md` | 仅同语言时出现：`article.md` 混进了标题/导航，或分句时改了字 |
 | `有句子不是中文` | `speech.md` 漏译或出现了纯标点行 |
 | `digits_left` 非空 | `speech.tts.md` 还有阿拉伯数字，改中文读法 |
+| 数字读法念错（如 `20` 变 `二零`、`105` 变 `一百五`） | `check tts-text` 查不出来；回 §6 做二次检查，按数量/编号分类重写那几行，再重跑 `check tts-text` |
 | `pages.json 不连续` | 重跑 `$HV pages <slug>`，别手改 from/to |
 | `script.md 页数与 slides 不一致` | 补页或删页，重跑 `$HV check script` |
 | `speech.md 段落数与 script.md 不一致` | 按页重新分句，重跑 `$HV pages` |
