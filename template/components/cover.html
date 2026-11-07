@@ -1,0 +1,33 @@
+<!-- 封面组件：标题 + 导语 + 作者/日期。每篇只有一张，放在第一页。
+     字段：kicker 栏目、h1 主标题（判断或冲突，不写“概述”）、dek 一句导语、
+     top 左=机构/作者、top 右=栏目/日期、foot 左=作者/机构、foot 右=来源或日期。
+     不要放目录、不要放第二张封面。 -->
+<section class="slide cover slide-title" data-index="0">
+  <div class="top">
+    <span>机构 · 作者</span>
+    <span>栏目 · 2026-11-07</span>
+  </div>
+  <div class="rule"></div>
+
+  <div class="head">
+    <div>
+      <div class="kicker">栏目名</div>
+      <h1>主标题，写判断或冲突，<br>不写“XX 概述”</h1>
+      <p class="dek">一句导语，说清这篇要回答什么问题。不超过两行。</p>
+    </div>
+  </div>
+
+  <div class="meta">作者 · 合作者 · 机构</div>
+
+  <!-- 可选：底部三个数字，把封面下半屏填满；没有数字就整段删掉。 -->
+  <div class="strip">
+    <div><b>7.9% → 48.1%</b><span>关键指标的变化，写清口径</span></div>
+    <div><b>0.016%</b><span>改动了多少权重</span></div>
+    <div><b>20×</b><span>相对谁，多少步</span></div>
+  </div>
+
+  <div class="foot">
+    <span>作者 / 机构</span>
+    <span class="en">SOURCE / DATE</span>
+  </div>
+</section>

@@ -1,0 +1,84 @@
+[workspace]
+members = [".", "lib/voxcpm-rs"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+
+[workspace.dependencies]
+hound = { version = "3.5", default-features = false }
+rubato = { version = "5.0", default-features = false }
+regex = { version = "1.13", default-features = false }
+memmap2 = { version = "0.9", default-features = false }
+base64 = { version = "0.23", default-features = false }
+futures = { version = "0.3", default-features = false }
+bytemuck = { version = "1.25", default-features = false }
+chromiumoxide = { version = "0.9", default-features = false }
+log = { version = "0.4", default-features = false, features = ["std"] }
+half = { version = "2.7", default-features = false, features = ["std"] }
+anyhow = { version = "1.0", default-features = false, features = ["std"] }
+approx = { version = "0.5", default-features = false, features = ["std"] }
+thiserror = { version = "2.0", default-features = false, features = ["std"] }
+serde_json = { version = "1.0", default-features = false, features = ["std"] }
+safetensors = { version = "0.8", default-features = false, features = ["std"] }
+tokenizers = { version = "0.23", default-features = false, features = ["onig"] }
+
+clap = { version = "4.6", default-features = false, features = [
+  "std",
+  "env",
+  "help",
+  "usage",
+  "derive",
+  "error-context",
+] }
+burn = { version = "0.22", default-features = false, features = [
+  "std",
+  "flex",
+] }
+serde = { version = "1.0", default-features = false, features = [
+  "std",
+  "derive",
+] }
+tokio = { version = "1.54", default-features = false, features = [
+  "time",
+  "rt-multi-thread",
+] }
+symphonia = { version = "0.6", default-features = false, features = [
+  "wav",
+  "flac",
+  "ogg",
+  "pcm",
+  "mp3",
+  "vorbis",
+] }
+env_logger = { version = "0.11", default-features = false, features = [
+  "auto-color",
+  "humantime",
+] }
+burn-store = { version = "0.22", default-features = false, features = [
+  "std",
+  "pytorch",
+  "safetensors",
+] }
+voxcpm-rs = { path = "lib/voxcpm-rs", default-features = false, features = [
+  "wgpu",
+] }
+
+[package]
+name = "html-video-toolbox"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+clap.workspace = true
+burn.workspace = true
+hound.workspace = true
+regex.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+base64.workspace = true
+futures.workspace = true
+voxcpm-rs.workspace = true
+serde_json.workspace = true
+chromiumoxide.workspace = true

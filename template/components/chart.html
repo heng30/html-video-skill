@@ -1,0 +1,27 @@
+<!-- 图表组件：只用原文确有数据的一页。横向条形图，用来做前后对比或数量级对比。
+     字段：SVG 里每条 rect 的宽度按数值比例；text 标数值；legend 写口径。
+     突出条：前后对比里的“后”或最亮眼的一条加 class="bar hot"，条与数值都用品牌色。
+     没有数据就不要用本组件；一页最多 4 条，超过就拆页。 -->
+<section class="slide chart-slide slide-content" data-index="8">
+  <div class="top">
+    <span><span class="sec">08</span> · 图表</span>
+    <span>栏目 · 数据</span>
+  </div>
+  <div class="rule"></div>
+
+  <h2>先给判断，再让条形作证</h2>
+  <p class="dek">同一页只比较同一口径的数字，条长从 0 开始。</p>
+
+  <div class="body">
+    <div class="chart">
+      <div class="bar"><span class="name">修改前</span><div class="track"><i style="width:16%"></i></div><span class="val">7.9%</span></div>
+      <div class="bar hot"><span class="name">修改后</span><div class="track"><i style="width:100%"></i></div><span class="val">48.1%</span></div>
+      <div class="legend"><div><b>口径</b>同一测试集、同一采样设置</div></div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <span>这组数据说明什么。</span>
+    <span class="en">FIGURE / SOURCE</span>
+  </div>
+</section>

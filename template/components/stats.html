@@ -1,0 +1,43 @@
+<!-- 数字组：三到四个关键数字并排，用间距分隔，不画竖线。
+     字段：stats 里的 stat，每个 b 是数字（支持 <span class="arrow">→</span>），span 说明口径。
+     一页最多一个数字上色；没有真实数据就不要用本组件。 -->
+<section class="slide stats-slide slide-content" data-index="2">
+  <div class="top">
+    <span><span class="sec">03</span> · 数据</span>
+    <span>栏目 · 指标</span>
+  </div>
+  <div class="rule"></div>
+
+  <h2>数字先给结论，再解释口径</h2>
+  <p class="dek">同一页只比较同一类数字，单位写在说明里。</p>
+
+  <div class="body">
+    <div class="stats">
+      <div class="stat">
+        <b>7.9% <span class="arrow">→</span> 48.1%</b>
+        <span>指标名，口径与样本量</span>
+      </div>
+      <div class="stat">
+        <b>0.016%</b>
+        <span>改动比例，说明分母</span>
+      </div>
+      <div class="stat">
+        <b>20<span class="arrow">×</span></b>
+        <span>相对倍数，写清对手是谁</span>
+      </div>
+    </div>
+    <p class="note"><b>口径</b>来源、时间范围、样本量。查不到就不写数字。</p>
+
+    <!-- 可选：数字下面接条形图，填满下半屏。没有对比就删掉整段 chart。 -->
+    <div class="chart">
+      <div class="bar"><span class="name">7.9% 修改前</span><div class="track"><i style="width:16%"></i></div><span class="val">7.9%</span></div>
+      <div class="bar"><span class="name">48.1% 修改后</span><div class="track"><i style="width:100%"></i></div><span class="val">48.1%</span></div>
+      <div class="legend"><div><b>口径</b>同一测试集、同一采样设置</div></div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <span>这组数字说明什么。</span>
+    <span class="en">SOURCE</span>
+  </div>
+</section>

@@ -1,0 +1,36 @@
+[package]
+name = "voxcpm-rs"
+version.workspace = true
+edition.workspace = true
+categories = ["multimedia::audio", "science"]
+keywords = ["tts", "voxcpm", "speech", "audio", "inference"]
+description = "Pure-Rust inference for VoxCPM2 on top of the Burn framework (Vulkan + CPU)."
+
+[features]
+default = ["cpu"]
+wgpu = ["burn/wgpu"]
+all-backends = ["wgpu", "cpu"]
+cpu = ["burn/flex", "burn/simd"]
+cpu-blas = ["cpu", "burn/openblas"]
+vulkan = ["burn/wgpu", "burn/vulkan"]
+wgpu-fast = ["wgpu", "burn/fusion", "burn/autotune"]
+
+[dependencies]
+half.workspace = true
+hound.workspace = true
+rubato.workspace = true
+memmap2.workspace = true
+bytemuck.workspace = true
+safetensors.workspace = true
+log.workspace = true
+burn.workspace = true
+symphonia.workspace = true
+thiserror.workspace = true
+serde_json.workspace = true
+tokenizers.workspace = true
+serde.workspace = true
+burn-store.workspace = true
+
+[dev-dependencies]
+approx.workspace = true
+env_logger.workspace = true
