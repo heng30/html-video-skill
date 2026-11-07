@@ -37,6 +37,12 @@ pub fn read_sentences(path: &Path) -> Result<Vec<Sentence>> {
     Ok(sentences)
 }
 
+/// 字幕行尾去掉句读标点，否则拖尾标点在屏幕上很突兀。
+pub fn strip_tail_punct(text: &str) -> &str {
+    let trimmed = text.trim_end_matches(|c: char| "。，；：、！？!?,.;:".contains(c));
+    trimmed.trim_end_matches(['—', '-', '）', ')'])
+}
+
 pub fn squeeze(text: &str) -> String {
     text.chars().filter(|c| !c.is_whitespace()).collect()
 }

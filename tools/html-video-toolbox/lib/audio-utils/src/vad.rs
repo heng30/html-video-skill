@@ -1,0 +1,259 @@
+use derivative::Derivative;
+use derive_setters::Setters;
+
+#[derive(Debug, Clone)]
+pub struct AudioSegment {
+    pub start_sample: usize,
+    pub end_sample: usize,
+    pub audio_data: Vec<f32>,
+}
+
+// Only support one channel audio
+#[derive(Debug, Clone, Derivative, Setters)]
+#[derivative(Default)]
+#[setters(prefix = "with_")]
+#[non_exhaustive]
+pub struct VadConfig {
+    #[derivative(Default(value = "16_000"))]
+    pub sample_rate: u32,
+
+    #[derivative(Default(value = "250"))]
+    pub min_speech_duration_ms: u32,
+
+    #[derivative(Default(value = "200"))]
+    pub min_silence_duration_ms: u32,
+
+    // Energy threshold for speech detection (0.0 - 1.0)
+    // Lower = more sensitive, Higher = less sensitive
+    #[derivative(Default(value = "0.01"))]
+    pub speech_threshold: f32,
+
+    // Window size in milliseconds for energy calculation
+    #[derivative(Default(value = "30"))]
+    pub window_size_ms: u32,
+}
+
+pub fn detect_speech_segments(audio_data: &[f32], config: &VadConfig) -> Vec<AudioSegment> {
+    if audio_data.is_empty() {
+        return Vec::new();
+    }
+
+    let window_size = (config.sample_rate as usize * config.window_size_ms as usize) / 1000;
+    let hop_size = window_size / 2; // 50% overlap
+    let min_speech_samples =
+        (config.sample_rate as usize * config.min_speech_duration_ms as usize) / 1000;
+    let min_silence_samples =
+        (config.sample_rate as usize * config.min_silence_duration_ms as usize) / 1000;
+
+    let mut energies = Vec::new();
+
+    for i in (0..audio_data.len().saturating_sub(window_size)).step_by(hop_size) {
+        let window_energy: f32 = audio_data[i..i + window_size]
+            .iter()
+            .map(|&x| x * x)
+            .sum::<f32>()
+            / window_size as f32;
+
+        energies.push((i, window_energy));
+    }
+
+    if energies.is_empty() {
+        return Vec::new();
+    }
+
+    // Find max energy for normalization
+    let max_energy = energies
+        .iter()
+        .map(|&(_, e)| e)
+        .fold(0.0f32, |a, b| a.max(b));
+
+    // Audio is too quiet
+    if max_energy < 1e-6 {
+        return Vec::new();
+    }
+
+    // Detect speech based on threshold
+    let mut in_speech = false;
+    let mut speech_start = 0;
+    let mut silence_start = 0;
+    let mut segments = Vec::new();
+
+    for &(window_pos, energy) in &energies {
+        let normalized_energy = energy / (max_energy + 1e-6);
+        let is_speech = normalized_energy > config.speech_threshold;
+
+        if is_speech && !in_speech {
+            // Start of speech segment
+            in_speech = true;
+            speech_start = window_pos;
+        } else if !is_speech && in_speech {
+            // Potential end of speech segment (silence detected)
+            if silence_start == 0 {
+                silence_start = window_pos;
+            }
+
+            let silence_duration = window_pos - silence_start;
+            if silence_duration >= min_silence_samples {
+                // End of speech segment
+                let speech_duration = window_pos - speech_start;
+
+                if speech_duration >= min_speech_samples {
+                    let end_sample = window_pos;
+                    let segment_audio = audio_data[speech_start..end_sample].to_vec();
+
+                    segments.push(AudioSegment {
+                        start_sample: speech_start,
+                        end_sample: end_sample,
+                        audio_data: segment_audio,
+                    });
+                }
+
+                in_speech = false;
+                silence_start = 0;
+            }
+        } else if is_speech && in_speech {
+            // Still in speech, reset silence timer
+            silence_start = 0;
+        }
+    }
+
+    // Handle last segment if it ends with speech
+    if in_speech {
+        let speech_duration = audio_data.len() - speech_start;
+
+        if speech_duration >= min_speech_samples {
+            let segment_audio = audio_data[speech_start..].to_vec();
+
+            segments.push(AudioSegment {
+                start_sample: speech_start,
+                end_sample: audio_data.len(),
+                audio_data: segment_audio,
+            });
+        }
+    }
+
+    // Merge very close segments (less than min_silence_duration_ms apart)
+    if segments.len() > 1 {
+        let mut merged_segments = Vec::new();
+        let mut current_segment = segments[0].clone();
+
+        for segment in segments.iter().skip(1) {
+            let gap = segment
+                .start_sample
+                .checked_sub(current_segment.end_sample)
+                .expect("Speech segments overlap - this indicates a bug in segment creation");
+            let gap_ms = (gap * 1000) / config.sample_rate as usize;
+
+            if gap_ms < config.min_silence_duration_ms as usize {
+                // Merge segments
+                current_segment.end_sample = segment.end_sample;
+                current_segment.audio_data.extend(&segment.audio_data);
+            } else {
+                merged_segments.push(current_segment.clone());
+                current_segment = segment.clone();
+            }
+        }
+        merged_segments.push(current_segment);
+        merged_segments
+    } else {
+        segments
+    }
+}
+
+/// Trim leading silence from a voice segment using energy-based detection.
+/// Returns the new start_ms after trimming.
+/// `keep_silence_ms` specifies how many milliseconds of leading silence to retain
+/// (prevents the audio from starting too abruptly with no natural pause).
+pub fn trim_leading_silence(
+    audio_data: &[f32],
+    original_start_ms: u64,
+    config: &VadConfig,
+    keep_silence_ms: u64,
+) -> u64 {
+    let window_size = (config.sample_rate as usize * config.window_size_ms as usize) / 1000;
+    let hop_size = window_size / 2;
+
+    if audio_data.len() < window_size {
+        return original_start_ms;
+    }
+
+    // Calculate max energy for normalization
+    let max_energy: f32 = audio_data
+        .windows(window_size)
+        .step_by(hop_size)
+        .map(|w| w.iter().map(|&x| x * x).sum::<f32>() / window_size as f32)
+        .fold(0.0f32, |a, b| a.max(b));
+
+    if max_energy < 1e-6 {
+        return original_start_ms;
+    }
+
+    // Find first window exceeding threshold
+    for (i, window) in audio_data
+        .windows(window_size)
+        .step_by(hop_size)
+        .enumerate()
+    {
+        let energy: f32 = window.iter().map(|&x| x * x).sum::<f32>() / window_size as f32;
+        if energy / (max_energy + 1e-6) > config.speech_threshold {
+            let trim_samples = i * hop_size;
+            let trim_ms = (trim_samples as f64 * 1000.0 / config.sample_rate as f64).round() as u64;
+
+            // Retain keep_silence_ms of silence before the speech starts
+            let kept_ms = trim_ms.saturating_sub(keep_silence_ms);
+            return original_start_ms + kept_ms;
+        }
+    }
+
+    original_start_ms
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_detect_speech_segments() {
+        let sample_rate = 16000;
+        let config = VadConfig::default()
+            .with_sample_rate(sample_rate)
+            .with_min_speech_duration_ms(100)
+            .with_min_silence_duration_ms(100)
+            .with_speech_threshold(0.01)
+            .with_window_size_ms(30);
+
+        // Create test audio: speech - silence - speech
+        let mut audio = Vec::new();
+
+        // Speech segment 1 (0.5 seconds)
+        for _ in 0..(sample_rate / 2) {
+            audio.push(0.1); // Some energy
+        }
+
+        // Silence (0.3 seconds)
+        for _ in 0..(sample_rate * 3 / 10) {
+            audio.push(0.001); // Very low energy
+        }
+
+        // Speech segment 2 (0.5 seconds)
+        for _ in 0..(sample_rate / 2) {
+            audio.push(0.1);
+        }
+
+        let segments = detect_speech_segments(&audio, &config);
+
+        // Should detect 2 segments
+        assert_eq!(segments.len(), 2);
+
+        println!(
+            "{}ms -> {}md",
+            segments[0].start_sample * 1000 / 16000,
+            segments[0].end_sample * 1000 / 16000
+        );
+        println!(
+            "{}ms -> {}ms",
+            segments[1].start_sample * 1000 / 16000,
+            segments[1].end_sample * 1000 / 16000
+        );
+    }
+}

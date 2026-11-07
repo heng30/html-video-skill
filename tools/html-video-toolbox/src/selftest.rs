@@ -114,6 +114,15 @@ pub fn run() -> Result<()> {
     }
     checks += 1;
 
+    // ASR 比对：数字的阿拉伯写法与中文读法算一致
+    if (crate::asr::similarity("二零二四年发布", "2024年发布") - 1.0).abs() > 1e-9 {
+        bail!("selftest failed [asr] digits should normalize to the same text");
+    }
+    if crate::asr::similarity("完全不一样的一句话", "牛头不对马嘴的感受") > 0.6 {
+        bail!("selftest failed [asr] unrelated texts must not match");
+    }
+    checks += 1;
+
     let _ = std::fs::remove_dir_all(&root);
     print_json(&json!({ "ok": true, "checks": checks }));
     Ok(())

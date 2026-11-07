@@ -1,5 +1,5 @@
 use crate::state::STEPS;
-use crate::text::{print_json, read_json};
+use crate::text::{self, print_json, read_json};
 use anyhow::{Result, anyhow};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
@@ -122,7 +122,8 @@ pub fn evaluate(root: &Path) -> Value {
         problems.push(format!("{} subtitle cues vs {} sentences", cues.len(), total));
     } else {
         for (index, (cue, sentence)) in cues.iter().zip(&sentences).enumerate() {
-            if sentence["text"].as_str() != Some(cue.1.as_str()) {
+            let expected = text::strip_tail_punct(sentence["text"].as_str().unwrap_or(""));
+            if expected != cue.1.as_str() {
                 problems.push(format!("subtitle {} does not match speech.md", index + 1));
             }
         }

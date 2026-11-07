@@ -1,1 +1,4 @@
 tools/*/target/
+
+/wayshot
+/weight-space-programming

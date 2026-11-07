@@ -1,0 +1,31 @@
+[package]
+name = "fun-ast-nano"
+version.workspace = true
+edition.workspace = true
+publish = false
+description = "Fun-ASR-Nano speech recognition on candle (vendored from wayshot)"
+
+[dependencies]
+log.workspace = true
+rand.workspace = true
+hound.workspace = true
+rayon.workspace = true
+strum.workspace = true
+cfg-if.workspace = true
+candle-nn.workspace = true
+thiserror.workspace = true
+serde_json.workspace = true
+derivative.workspace = true
+serde_yaml.workspace = true
+tokenizers.workspace = true
+candle-core.workspace = true
+tensor-utils.workspace = true
+strum_macros.workspace = true
+derive_setters.workspace = true
+serde = { workspace = true, features = ["derive"] }
+audio-utils = { workspace = true, features = ["extraction"] }
+
+[features]
+mkl = ["candle-nn/mkl"]
+cuda = ["candle-nn/cuda", "candle-core/cuda"]
+metal = ["candle-nn/metal", "candle-core/metal"]

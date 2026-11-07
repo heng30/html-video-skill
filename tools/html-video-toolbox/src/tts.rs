@@ -32,6 +32,9 @@ pub struct Args {
     /// process only these sentence indexes, comma separated
     #[arg(long)]
     pub only: Option<String>,
+    /// re-synthesize only the sentences listed in voice/asr-retry.json
+    #[arg(long)]
+    pub retry: bool,
     /// synthesize on the wgpu GPU backend instead of the CPU (flex) backend
     #[arg(long)]
     pub gpu: bool,
@@ -158,12 +161,6 @@ fn read_pcm16(path: &Path) -> Result<(Vec<i16>, u32)> {
     Ok((samples, spec.sample_rate))
 }
 
-/// 字幕行尾去掉句读标点，否则拖尾标点在屏幕上很突兀。
-fn strip_tail_punct(text: &str) -> &str {
-    let trimmed = text.trim_end_matches(|c: char| "。，；：、！？!?,.;:".contains(c));
-    trimmed.trim_end_matches(['—', '-', '）', ')'])
-}
-
 fn timestamp(ms: u64) -> String {
     let hours = ms / 3_600_000;
     let minutes = (ms % 3_600_000) / 60_000;
@@ -225,6 +222,15 @@ pub fn run(args: Args) -> Result<()> {
         manifest["sentences"] = json!({});
     }
     let only = parse_only(args.only.as_deref())?;
+    let retry = if args.retry {
+        let indexes = crate::asr::retry_indexes(&root)?;
+        if indexes.is_empty() {
+            bail!("no sentence queued in voice/asr-retry.json, run `asr <dir>` first");
+        }
+        Some(indexes)
+    } else {
+        None
+    };
 
     let mut synth: Vec<usize> = Vec::new();
     let mut trim_needs: Vec<usize> = Vec::new();
@@ -234,8 +240,9 @@ pub fn run(args: Args) -> Result<()> {
         let trimmed = voice_dir.join(format!("sent-{index:04}.wav"));
         let unchanged = manifest["sentences"][index.to_string()]["tts_text"].as_str()
             == Some(line.text.as_str());
-        let selected = only.as_ref().is_none_or(|set| set.contains(&index));
-        let need = (args.force || !unchanged || !raw.exists()) && selected;
+        let selected = only.as_ref().is_none_or(|set| set.contains(&index))
+            && retry.as_ref().is_none_or(|set| set.contains(&index));
+        let need = (args.force || retry.is_some() || !unchanged || !raw.exists()) && selected;
         if need {
             synth.push(index);
         }
@@ -335,7 +342,7 @@ pub fn run(args: Args) -> Result<()> {
             entry["index"],
             timestamp(entry["start_ms"].as_u64().unwrap_or(0)),
             timestamp(entry["end_ms"].as_u64().unwrap_or(0)),
-            strip_tail_punct(entry["text"].as_str().unwrap_or(""))
+            text::strip_tail_punct(entry["text"].as_str().unwrap_or(""))
         ));
     }
     let srt_path = root.join("subs/final.srt");

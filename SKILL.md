@@ -6,11 +6,11 @@ disable-model-invocation: true
 
 # html-video：文章 URL → 解说视频
 
-一条流水线，十步，两个人工断点。所有中间产物落盘，任何一步失败都能从断点续跑。整条流水线由一个工具包办：`$HV`（`html-video-toolbox`）的 `screenshot` / `state` / `check` / `pages` / `tts` / `compose` / `verify` 子命令。
+一条流水线，十步，两个人工断点。所有中间产物落盘，任何一步失败都能从断点续跑。整条流水线由一个工具包办：`$HV`（`html-video-toolbox`）的 `screenshot` / `state` / `check` / `pages` / `tts` / `asr` / `compose` / `verify` 子命令。
 
 **定位：粗剪。** 分句按语义走，不为了短视频节奏硬切；成片不烧字幕，字幕文件交给用户在剪辑器里自己合成和精修。
 
-**耗时预期**：VoxCPM2 在本机 CPU 上加载约 1.5–2 分钟，每句合成约 1–2 分钟。10 分钟成片按 1–2 小时估。先合成 1–2 句试听，再跑全量。
+**耗时预期**：VoxCPM2 在本机 CPU 上加载约 1.5–2 分钟，每句合成约 1–2 分钟。10 分钟成片按 1–2 小时估。先合成 1–2 句试听，再跑全量。回听校验（`asr`）另算：模型加载约 20 秒，每句再多几秒。
 
 | 步骤 | 产物 | 谁做 |
 |---|---|---|
@@ -21,7 +21,7 @@ disable-model-invocation: true
 | `speech` | `speech.md`、`slides/pages.json` | agent（分句）+ `pages` |
 | `review-speech` | 无（人工断点） | 人 |
 | `tts-text` | `speech.tts.md` | agent（LLM 转口语稿） |
-| `tts` | `voice/`、`subs/final.srt` | `tts` |
+| `tts` | `voice/`、`subs/final.srt`、`voice/asr.json` | `tts` + `asr`（逐句回听校验） |
 | `compose` | `final.mp4`、`final.srt` | `compose`（ffmpeg） |
 | `verify` | 无（验收报告） | `verify` |
 
@@ -44,7 +44,10 @@ disable-model-invocation: true
 │   ├── sent-0001.wav      # 裁剪静默后
 │   ├── full.wav           # 拼接整轨
 │   ├── timeline.json      # 每句起止时间
-│   └── manifest.json      # 每条语音对应的原文 + 配音稿
+│   ├── manifest.json      # 每条语音对应的原文 + 配音稿
+│   ├── asr.json           # 逐句转录结果：原文 / 转录 / 相似度 / 是否通过
+│   ├── asr-retry.json     # 待重新合成的句子，通过校验后自动移除
+│   └── bad/               # 转录不一致的音频存档（排错用，不自动删）
 ├── subs/final.srt
 ├── final.mp4
 ├── final.srt              # 外挂字幕
@@ -63,11 +66,12 @@ ffmpeg -version | head -1    # 需要 libx264 + aac
 ffprobe -version | head -1
 fc-match -f '%{family[0]}' 'sans-serif:lang=zh-cn'
 ls ~/models/VoxCPM2/config.json
+ls ~/models/Fun-ASR-Nano-2512/model.pt ~/models/Fun-ASR-Nano-2512/Qwen3-0.6B/tokenizer.json
 ls $SKILL/assets/cloned-voice.wav
 ls $HV
 ```
 
-- 工具不在 "$HV" 解析顺序的任何位置时才构建（首次约 10 分钟，含 burn/wgpu）：
+- 工具不在 "$HV" 解析顺序的任何位置时才构建（首次约 10 分钟，含 burn/wgpu 与 candle）：
 
   ```bash
   cd $SKILL/tools/html-video-toolbox && cargo build --release
@@ -77,7 +81,8 @@ ls $HV
 - 字体：`$SKILL/assets/fonts/` 内置 Noto Sans CJK SC / Mono / Serif，生成 deck 时复制到 `<slug>/fonts/`；缺失时回落系统字体，不阻断。
 - 音色：`$SKILL/assets/cloned-voice.wav` 必须存在，**缺失就停**，提示用户补充后继续。
   `assets/cloned-voice.txt` 是对应参考文本，只供人工核对，VoxCPM2 不读取。
-- 模型：默认 `~/models/VoxCPM2`，可用 `--model-dir` 或 `VOXCPM_MODEL_DIR` 覆盖。
+- TTS 模型：默认 `~/models/VoxCPM2`，可用 `--model-dir` 或 `VOXCPM_MODEL_DIR` 覆盖。
+- 回听模型（Fun-ASR-Nano，candle）：默认 `~/models/Fun-ASR-Nano-2512`，可用 `--model-dir` 或 `FUNASR_MODEL_DIR` 覆盖。`$HV` 内置该模型代码（`lib/fun-ast-nano`），缺失权重就直接报错，**不要拿别的 ASR 顶替**。
 - 路径优先级统一为：命令行参数 > 环境变量 > 默认。
 
 ## 断点协议
@@ -262,11 +267,32 @@ $HV check tts-text <slug>
 $HV tts <slug> --gui --voice $SKILL/assets/cloned-voice.wav
 ```
 
-可选：`--model-dir <dir>`、`--gpu`（用 wgpu GPU 后端合成，不加则默认 CPU `flex` 后端）、`--force`（全量重合成）、`--only 1,3,5`（只处理这几句）、`--cfg` / `--steps` / `--max-len`（生成参数）。工具一次加载模型，逐句合成，裁剪每句首尾静默（句首 ≤50ms、句尾 ≤120ms，-40dB），按句间 150ms、段间 400ms 拼接，写出 `voice/full.wav`、`voice/timeline.json`、`voice/manifest.json`、`subs/final.srt`。
+可选：`--model-dir <dir>`、`--gpu`（用 wgpu GPU 后端合成，不加则默认 CPU `flex` 后端）、`--force`（全量重合成）、`--only 1,3,5`（只处理这几句）、`--retry`（只重合成 `voice/asr-retry.json` 里的句子）、`--cfg` / `--steps` / `--max-len`（生成参数）。工具一次加载模型，逐句合成，裁剪每句首尾静默（句首 ≤50ms、句尾 ≤120ms，-40dB），按句间 150ms、段间 400ms 拼接，写出 `voice/full.wav`、`voice/timeline.json`、`voice/manifest.json`、`subs/final.srt`。
 
 - 音色缺失会直接报错停下，补好 `assets/cloned-voice.wav` 后重跑同一条命令（或设 `VOICE_CLONE_WAV`）。
 - 断点粒度是句子：`speech.tts.md` 某行不变就跳过该句；只改了几句就只重合成那几句。
 - `manifest.json` 记录了每条语音对应的原文与配音稿，可逐条核对。
+
+**合成完必须逐句回听校验，不能直接进 `compose`：**
+
+```bash
+$HV asr <slug>
+```
+
+工具用 Fun-ASR-Nano 逐句转录 `voice/sent-NNNN.wav`，和 `speech.tts.md` 对应行比对（去掉标点、阿拉伯数字按位转中文读法后算相似度），写出 `voice/asr.json`。
+
+- 全部相似度 ≥ `--min-similarity`（默认 0.85）才 `ok: true`。
+- 不一致的句子记进 `voice/asr-retry.json`，并把当前音频拷到 `voice/bad/sent-NNNN-<第几次>.wav` 存档排错，**这两样都不删**。
+- 有 `mismatched` 时命令以非零退出，接着重合成，再回听，直到全部通过：
+
+```bash
+$HV tts <slug> --retry --voice $SKILL/assets/cloned-voice.wav
+$HV asr <slug>
+```
+
+- `--retry` 只重合成 `voice/asr-retry.json` 里的句子（自动 force）；重合成后再跑 `asr`，能对上就自动从文件里移除，`entries` 清空才算过。
+- 同一句重试 3 轮仍不过：先看 `voice/bad/` 里的存档，读 `voice/asr.json` 的 `asr_text`。是 ASR 听错（同音字、专名）就改 `speech.tts.md` 的读法重跑 `check tts-text`，必要时用 `--min-similarity` 放宽；不要直接 `state done tts` 蒙过去。
+- 只有 `asr` 全绿（或人工逐条听过 `voice/bad/` 里剩下的句子）才能继续。
 
 `$HV state done <slug> tts`
 
@@ -298,6 +324,8 @@ $HV verify <slug>
 - 不改原文、不编内容；分句校验不过就不许进配音。
 - 页时间只能落在句边界上，不按字数估算。
 - 成片不烧字幕；`final.srt` 是给用户后期用的，不要在 ffmpeg 里加 `subtitles`。
+- 每句合成音频都要过 `$HV asr` 回听校验；`voice/asr-retry.json` 非空就不许 `state done tts`、不许 `compose`。
+- `voice/bad/` 里的存档是排错证据，校验通过也不删。
 - 截图只走 `$HV screenshot`，不许换浏览器、不许用 playwright 兜底。
 - 截图后必须逐张看图确认高亮颜色与布局；有不合格的就改 `index.html` 重截，不许直接进 `script`。
 - 这是粗剪：允许句子偏长、允许停顿不完美，精修交给剪辑器。
@@ -311,6 +339,9 @@ $HV verify <slug>
 | `第 N 页尺寸为 0` | `index.html` 里没有 `class="slide"`，或页面结构被改坏 |
 | `缺少克隆音色参考音频` | 把参考音频放到 `$SKILL/assets/cloned-voice.wav`，或 `--voice` 指定 |
 | `模型目录无效` | `--model-dir ~/models/VoxCPM2` 或设 `VOXCPM_MODEL_DIR` |
+| `invalid asr model directory` | 缺 `~/models/Fun-ASR-Nano-2512/model.pt` 或 `Qwen3-0.6B/tokenizer.json`，补齐或 `--model-dir` / `FUNASR_MODEL_DIR` |
+| `sentences do not match the script` | 跑 `$HV tts <slug> --retry` 重合成，再跑 `$HV asr`；反复不过看 `voice/bad/` 与 `asr.json` 的 `asr_text` |
+| `no sentence queued in voice/asr-retry.json` | 先跑 `$HV asr`，还没校验就没有待重合成的句子 |
 | `review-speech 未完成` | 先人工审完 `speech.md`，再 `$HV state done <slug> review-speech` |
 | `分句拼不回 article.md` | 仅同语言时出现：`article.md` 混进了标题/导航，或分句时改了字 |
 | `有句子不是中文` | `speech.md` 漏译或出现了纯标点行 |

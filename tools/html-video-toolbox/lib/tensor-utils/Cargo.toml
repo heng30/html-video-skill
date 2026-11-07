@@ -1,0 +1,10 @@
+[package]
+name = "tensor-utils"
+version.workspace = true
+edition.workspace = true
+publish = false
+description = "small tensor helpers (vendored from wayshot)"
+
+[dependencies]
+thiserror.workspace = true
+candle-core.workspace = true

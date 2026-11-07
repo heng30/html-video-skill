@@ -1,5 +1,11 @@
 [workspace]
-members = [".", "lib/voxcpm-rs"]
+members = [
+  ".",
+  "lib/voxcpm-rs",
+  "lib/audio-utils",
+  "lib/tensor-utils",
+  "lib/fun-ast-nano",
+]
 resolver = "3"
 
 [workspace.package]
@@ -10,19 +16,37 @@ edition = "2024"
 hound = { version = "3.5", default-features = false }
 rubato = { version = "5.0", default-features = false }
 regex = { version = "1.13", default-features = false }
+rayon = { version = "1.11", default-features = false }
+cfg-if = { version = "1.0", default-features = false }
 memmap2 = { version = "0.9", default-features = false }
 base64 = { version = "0.23", default-features = false }
 futures = { version = "0.3", default-features = false }
+realfft = { version = "3.5", default-features = false }
 bytemuck = { version = "1.25", default-features = false }
+serde_yaml = { version = "0.9", default-features = false }
+derivative = { version = "2.2", default-features = false }
+pitch_shift = { version = "2.1", default-features = false }
+strum_macros = { version = "0.28", default-features = false }
 chromiumoxide = { version = "0.9", default-features = false }
+derive_setters = { version = "0.1", default-features = false }
+tensor-utils = { path = "lib/tensor-utils", default-features = false }
+fun-ast-nano = { path = "lib/fun-ast-nano", default-features = false }
+
 log = { version = "0.4", default-features = false, features = ["std"] }
 half = { version = "2.7", default-features = false, features = ["std"] }
 anyhow = { version = "1.0", default-features = false, features = ["std"] }
+strum = { version = "0.28", default-features = false, features = ["std"] }
 approx = { version = "0.5", default-features = false, features = ["std"] }
 thiserror = { version = "2.0", default-features = false, features = ["std"] }
 serde_json = { version = "1.0", default-features = false, features = ["std"] }
 safetensors = { version = "0.8", default-features = false, features = ["std"] }
 tokenizers = { version = "0.23", default-features = false, features = ["onig"] }
+candle-core = { version = "0.11", default-features = false }
+candle-nn = { version = "0.11", default-features = false }
+rand = { version = "0.10", default-features = false, features = [
+  "std",
+  "std_rng",
+] }
 
 clap = { version = "4.6", default-features = false, features = [
   "std",
@@ -65,6 +89,9 @@ burn-store = { version = "0.22", default-features = false, features = [
 voxcpm-rs = { path = "lib/voxcpm-rs", default-features = false, features = [
   "wgpu",
 ] }
+audio-utils = { path = "lib/audio-utils", default-features = false, features = [
+  "extraction",
+] }
 
 [package]
 name = "html-video-toolbox"
@@ -82,4 +109,6 @@ base64.workspace = true
 futures.workspace = true
 voxcpm-rs.workspace = true
 serde_json.workspace = true
+audio-utils.workspace = true
+fun-ast-nano.workspace = true
 chromiumoxide.workspace = true

@@ -1,0 +1,23 @@
+[package]
+name = "audio-utils"
+version.workspace = true
+edition.workspace = true
+publish = false
+description = "audio loading / VAD / feature extraction (vendored from wayshot)"
+
+[dependencies]
+log.workspace = true
+hound.workspace = true
+thiserror.workspace = true
+derivative.workspace = true
+pitch_shift.workspace = true
+derive_setters.workspace = true
+symphonia.workspace = true
+rayon = { workspace = true, optional = true }
+realfft = { workspace = true, optional = true }
+candle-core = { workspace = true, optional = true }
+tensor-utils = { workspace = true, optional = true }
+
+[features]
+default = []
+extraction = ["dep:candle-core", "dep:rayon", "dep:realfft", "dep:tensor-utils"]
