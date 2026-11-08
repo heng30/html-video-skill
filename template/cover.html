@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>封面</title>
+<style>
+/* 三张封面：16:9 / 4:3 / 3:4。画布宽度统一 960，只改高度，
+   字号与正片一致；截图工具按短边 1080 出图，得到 1920×1080 / 1440×1080 / 1080×1440。
+   文字居中：内容块垂直居中、水平居中。改文案只改三个 <section> 里的字。 */
+
+@font-face {
+  font-family: "Noto Sans CJK SC";
+  src: url("fonts/NotoSansCJK-VF.otf.ttc") format("collection");
+  font-weight: 100 900;
+}
+@font-face {
+  font-family: "Noto Sans Mono CJK SC";
+  src: url("fonts/NotoSansMonoCJK-VF.otf.ttc") format("collection");
+  font-weight: 100 900;
+}
+
+:root {
+  --sans: "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --mono: "Noto Sans Mono CJK SC", "SF Mono", monospace;
+  --ink: #111413;
+  --soft: #3c4441;
+  --muted: #6c7572;
+  --signal: #bf3600;
+  --rule: rgba(17, 20, 19, 0.14);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #e7e9e8;
+  font-family: var(--sans);
+  color: var(--ink);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 32px;
+  padding: 32px;
+  -webkit-font-smoothing: antialiased;
+}
+
+.slide {
+  width: 960px;
+  flex: none;
+  background: #fff;
+  padding: 56px 64px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  overflow: hidden;
+}
+.slide.wide { height: 540px; }
+.slide.classic { height: 720px; }
+.slide.portrait { height: 1280px; }
+
+.kicker {
+  font-family: var(--mono);
+  font-size: 13px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--signal);
+}
+h1 {
+  margin-top: 22px;
+  font-size: 48px;
+  font-weight: 700;
+  line-height: 1.18;
+  letter-spacing: -0.01em;
+  max-width: 14em;
+}
+.hl { color: var(--signal); }
+.dek {
+  margin-top: 22px;
+  font-size: 18px;
+  line-height: 1.6;
+  color: var(--soft);
+  max-width: 20em;
+}
+.rule {
+  width: 64px;
+  height: 2px;
+  background: var(--signal);
+  margin-top: 28px;
+}
+.meta {
+  margin-top: 28px;
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+</style>
+</head>
+<body>
+
+<!-- 16:9 — 视频首帧、横版平台 -->
+<section class="slide wide">
+  <div class="kicker">栏目名</div>
+  <h1>主标题，写判断或冲突<br>长度不超过两行</h1>
+  <p class="dek">一句导语，说清这篇要回答什么<span class="hl">核心结论</span>。</p>
+  <div class="rule"></div>
+  <div class="meta">作者 / 机构</div>
+</section>
+
+<!-- 4:3 — 方一点的横版 -->
+<section class="slide classic">
+  <div class="kicker">栏目名</div>
+  <h1>主标题，写判断或冲突<br>长度不超过两行</h1>
+  <p class="dek">一句导语，说清这篇要回答什么<span class="hl">核心结论</span>。</p>
+  <div class="rule"></div>
+  <div class="meta">作者 / 机构</div>
+</section>
+
+<!-- 3:4 — 竖版平台 -->
+<section class="slide portrait">
+  <div class="kicker">栏目名</div>
+  <h1>主标题，写判断或冲突<br>长度不超过三行</h1>
+  <p class="dek">一句导语，说清这篇要回答什么<span class="hl">核心结论</span>。</p>
+  <div class="rule"></div>
+  <div class="meta">作者 / 机构</div>
+</section>
+
+</body>
+</html>

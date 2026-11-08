@@ -30,7 +30,7 @@ pub enum Command {
 fn required(step: &str) -> &'static [&'static str] {
     match step {
         "fetch" => &["url", "article.md", "title.md"],
-        "slides" => &["slides"],
+        "slides" => &["slides", "covers"],
         "script" => &["script.md"],
         "speech" => &["speech.md", "slides/pages.json"],
         "tts-text" => &["speech.tts.md"],
@@ -43,7 +43,7 @@ fn required(step: &str) -> &'static [&'static str] {
 fn hint(step: &str) -> Option<&'static str> {
     Some(match step {
         "fetch" => "fetch article text and images, write url / article.md / title.md",
-        "slides" => "build index.html, run html-video-toolbox screenshot",
+        "slides" => "build index.html + cover.html, run screenshot for slides and --covers",
         "script" => "write script.md page by page against slides, then run check script",
         "review-script" => "after manually reviewing script.md, run state done <dir> review-script",
         "speech" => "split script.md into sentences as speech.md, then run pages and check speech",

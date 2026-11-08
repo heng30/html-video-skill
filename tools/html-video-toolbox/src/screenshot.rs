@@ -33,6 +33,9 @@ pub struct Args {
     /// Chromium/Chrome executable
     #[arg(long, env = "CHROME_PATH")]
     pub chrome_path: Option<PathBuf>,
+    /// render cover.html instead: one PNG per .slide, short edge 1080 (16:9 / 4:3 / 3:4)
+    #[arg(long)]
+    pub covers: bool,
 }
 
 pub fn run(args: Args) -> Result<()> {
@@ -181,6 +184,30 @@ const BOUNDS_JS: &str = r#"(() => {
     return JSON.stringify({x:r.x, y:r.y, w:r.width, h:r.height});
 })()"#;
 
+/// 封面页不用 `.active`，全部 `.slide` 一起排布，逐个取框。
+const COVER_BOUNDS_JS: &str = r#"(() => JSON.stringify(
+    Array.from(document.querySelectorAll('.slide')).map(slide => {
+        const r = slide.getBoundingClientRect();
+        return {x: r.x, y: r.y, w: r.width, h: r.height};
+    })
+))()"#;
+
+fn cover_name(w: f64, h: f64) -> Result<&'static str> {
+    let ratio = w / h;
+    for (name, want) in [
+        ("16x9", 16.0 / 9.0),
+        ("4x3", 4.0 / 3.0),
+        ("3x4", 3.0 / 4.0),
+    ] {
+        if (ratio - want).abs() / want < 0.02 {
+            return Ok(name);
+        }
+    }
+    bail!(
+        "cover slide is {w:.0}x{h:.0} ({ratio:.3}), needs 16:9 / 4:3 / 3:4"
+    )
+}
+
 async fn activate(page: &Page, index: usize) -> Result<()> {
     page.evaluate_expression(activate_js(index))
         .await
@@ -216,6 +243,18 @@ async fn capture(page: &Page, index: usize, resolution: u32) -> Result<Vec<u8>> 
 
     let target_long_edge = (resolution as f64 * 16.0 / 9.0).round();
     let scale = target_long_edge / w.max(h);
+    capture_clip(page, x, y, w, h, scale).await
+}
+
+/// 按 clip 区域截图，返回 PNG 字节。
+async fn capture_clip(
+    page: &Page,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    scale: f64,
+) -> Result<Vec<u8>> {
     page.execute(SetDeviceMetricsOverrideParams::new(
         VIEWPORT_WIDTH,
         VIEWPORT_HEIGHT,
@@ -287,6 +326,52 @@ async fn run_async(args: Args) -> Result<()> {
     // 等字体与高亮脚本落位
     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
+    if args.covers {
+        page.evaluate_expression(HIDE_CHROME_JS).await?;
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        let rects: String = page
+            .evaluate_expression(COVER_BOUNDS_JS)
+            .await?
+            .into_value()
+            .context("failed to read cover bounds")?;
+        let rects: Vec<serde_json::Value> = serde_json::from_str(&rects)?;
+        if rects.is_empty() {
+            bail!("no .slide in {} (cover.html needs three: 16:9 / 4:3 / 3:4)", html.display());
+        }
+        let mut saved: Vec<String> = Vec::new();
+        let mut seen: Vec<&str> = Vec::new();
+        for (pos, rect) in rects.iter().enumerate() {
+            let (x, y, w, h) = (
+                rect["x"].as_f64().unwrap_or(0.0),
+                rect["y"].as_f64().unwrap_or(0.0),
+                rect["w"].as_f64().unwrap_or(0.0),
+                rect["h"].as_f64().unwrap_or(0.0),
+            );
+            if w <= 0.0 || h <= 0.0 {
+                bail!("cover slide {} has zero size; keep every .slide visible", pos + 1);
+            }
+            let name = cover_name(w, h)?;
+            if seen.contains(&name) {
+                bail!("duplicate {name} cover in {}", html.display());
+            }
+            seen.push(name);
+            // 封面按短边 1080 出图：1920×1080 / 1440×1080 / 1080×1440。
+            let bytes = capture_clip(&page, x, y, w, h, 1080.0 / w.min(h)).await?;
+            let path = args.output.join(format!("cover-{name}.png"));
+            std::fs::write(&path, &bytes)
+                .with_context(|| format!("cannot write {}", path.display()))?;
+            saved.push(json_entry(&path));
+            eprintln!("saved {}", path.display());
+        }
+        browser.close().await?;
+        let _ = handler_task.await;
+        crate::text::print_json(&serde_json::json!({
+            "ok": true,
+            "covers": saved,
+        }));
+        return Ok(());
+    }
+
     let total: String = page
         .evaluate_expression("String(document.querySelectorAll('.slide').length)")
         .await?
@@ -329,4 +414,17 @@ async fn run_async(args: Args) -> Result<()> {
 
 fn json_entry(path: &Path) -> String {
     path.display().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cover_ratios_are_named() {
+        assert_eq!(cover_name(960.0, 540.0).unwrap(), "16x9");
+        assert_eq!(cover_name(960.0, 720.0).unwrap(), "4x3");
+        assert_eq!(cover_name(720.0, 960.0).unwrap(), "3x4");
+        assert!(cover_name(1000.0, 1000.0).is_err());
+    }
 }

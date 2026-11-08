@@ -284,10 +284,21 @@ $HV state done <slug> review-speech
 
 最典型的两个错：`20` 写成 `二零`（该是 `二十`）、`105` 写成 `一百五` 或 `一零五`（该是 `一百零五`）；另外别丢单位：`3000 万` 是 `三千万`，`3 km` 是 `三公里`。
 
-**写完必须做一次二次检查（这一条不能省）：** 把 `speech.md` 和 `speech.tts.md` 并排逐行读，**只看带数字的行**，每处数字在心里过三问：① 它在这里是数量、序数还是编号/年份，读法选对了吗？② 位数丢了吗（有零位没读「零」）？③ 量词、单位、万/亿还挂着吗？
+**英文单词与标识符按形状分三类写，不要一律照抄：**
+
+| 形态 | 写法 | 例子 |
+|---|---|---|
+| 全大写但小写后是个正常词 | **转小写**，按普通单词读 | `NEXT` → `next`；`ONCE` → `once`；`RUST` → `rust`；`ALL` → `all` |
+| 专有名称 / 缩写，只能逐字母念 | **逐字母写开，字母间空格分隔**，不合并成词、不自然拼读 | `API` → `A P I`；`GPU` → `G P U`；`HTTP` → `H T T P`；`SDK` → `S D K`；`LLM` → `L L M` |
+| 函数名 / 变量名 / 驼峰名（带缩写） | **先还原缩写原词，再按单词、驼峰、连字符拆开** | `getCfg` → `get config`；`parseReqBody` → `parse request body`；`initDB` → `initialize D B`；`useMemo` → `use memo`；`srcDir` → `source directory`；`VoidZero` → `void zero`；`napi-rs` → `N API RS` |
+
+- 缩写还原靠猜：`cfg` config、`req` request、`res` response、`ctx` context、`fn` function、`impl` implementation、`msg` message、`err` error、`arg` argument、`idx` index、`len` length、`init` initialize、`tmp` temporary、`str` string、`num` number、`env` environment、`dir` directory、`pkg` package、`repo` repository、`lib` library、`deps` dependencies、`auth` authentication。猜不准就按音节拆开写（`nginx` → `engine x`)，不要留一坨驼峰让 TTS 自己拼。
+- 专有名同样先拆再考虑音译：`VoidZero` → `void zero`、`napi-rs` → `N API RS`、`oxc` → `O X C`、`ts.Transformer` → `T S transformer`。拆完还读不准，才按 §7 换成中文音译。
+
+**写完必须做一次二次检查（这一条不能省）：** 把 `speech.md` 和 `speech.tts.md` 并排逐行读，**只看带数字和英文的行**：数字每处过三问——① 它在这里是数量、序数还是编号/年份，读法选对了吗？② 位数丢了吗（有零位没读「零」）？③ 量词、单位、万/亿还挂着吗？英文每处过一句——大写转小写了吗、缩写展开成原词了吗、只能逐字母的有没有写开？
 
 - 把改过的数字逐条列出来（原文 → 读法 → 类型），有疑点的句子单独重写这一行，**不要整篇重写**（会破坏与 `speech.md` 的行对齐）。
-- 只做了阿拉伯数字清理、没做二次检查，视为这一步没做完。工具只查得出「还有阿拉伯数字」，查不出「二零」写错。
+- 只做了阿拉伯数字清理、没做英文标识符整理或二次检查，视为这一步没做完。工具只查得出「还有阿拉伯数字」，查不出「二零」写错，也查不出 `api` 被拼成词。
 
 校验：
 
@@ -337,7 +348,8 @@ $HV asr <slug> --only <刚重合成的句号>
 - `--retry` 只重合成 `voice/asr-retry.json` 里的句子（自动 force）；重合成后再跑 `asr`，能对上就自动从文件里移除，`entries` 清空才算过。
 - 首次全量 `asr` 之后，回环只跑单句 `--only`；只有 `speech.tts.md` 大面积重写、或 `asr.json` 缺失时才重跑全量。
 - 同一句重试 3 轮仍不过：先看 `voice/bad/` 里的存档，读 `voice/asr.json` 的 `asr_text`，判断是 ASR 听错还是 TTS 读糊（中文部分逐字对上、只崩英文标识符 = ASR 英文转写缺陷，属听错）。是听错就改 `speech.tts.md` 的读法：
-  - **英文标识符整词换成相近发音的中文**：TTS 念中文、ASR 也转中文，同语种才能对上。如 `napi-rs` → `纳皮尔斯`、`WASM` → `瓦森姆`、`oxc` → `奥克斯`、`VoidZero` → 中文音译。只做拆词/改大小写（`napi rs`、`wasm`、`TS Transformer`）无效，英文在 ASR 侧仍转成随机的英文或音译字，相似度反而更低。字幕仍来自 `speech.md`，改的只是配音稿。
+  - **先按 §6 拆开写**：`VoidZero` → `void zero`、`napi-rs` → `N API RS`、`oxc` → `O X C`、`ts.Transformer` → `T S transformer`。拆开后 TTS 按单词/字母念，ASR 才可能对上。
+  - **拆开仍不过，再整词换成相近发音的中文**：TTS 念中文、ASR 也转中文，同语种才对得上。如 `napi-rs` → `纳皮尔斯`、`WASM` → `瓦森姆`、`VoidZero` → 中文音译。只把字母粘成一坨（`napirs`、`voidzeroe`）、或者只改大小写而不拆词，无效，相似度反而更低。字幕仍来自 `speech.md`，改的只是配音稿。
   - **问题语句重构**：ASR 总在同一处断错、把句子听成两截的，调整该行断句或换同义说法，让口语更顺（不改语义、不增删内容）。
   - 改完必须重跑 `check tts-text`（`digits_left`、`paragraph_mismatch` 必须为空），再 `$HV tts <slug> --retry` 重合成该句，再 `$HV asr <slug> --only <该句号>`。
   - 反复仍不过才用 `--min-similarity` 放宽；不要直接 `state done tts` 蒙过去。
@@ -400,7 +412,7 @@ $HV verify <slug>
 | `speech.md and speech.tts.md line counts differ` | 违反审核点铁律：用户在 `review-speech` 改过 `speech.md`，但没重读重做 `speech.tts.md`。重读 `speech.md` → 重做 `speech.tts.md` → `check tts-text` |
 | `digits_left` 非空 | `speech.tts.md` 还有阿拉伯数字，改中文读法 |
 | 数字读法念错（如 `20` 变 `二零`、`105` 变 `一百五`） | `check tts-text` 查不出来；回 §6 做二次检查，按数量/编号分类重写那几行，再重跑 `check tts-text` |
-| `asr` 卡在英文标识符句（`napi-rs`、`WASM`、`ts.Transformer` 相似度低） | ASR 英文转写缺陷，非读错；回 §7 改 `speech.tts.md` 读法（英文整词换相近发音的中文 / 重构语句）→ `check tts-text` → `tts --retry` → `asr --only <该句号>` |
+| `asr` 卡在英文标识符句（`napi-rs`、`WASM`、`ts.Transformer` 相似度低） | ASR 英文转写缺陷，非读错；回 §7 改 `speech.tts.md` 读法（先按 §6 拆词：`napi-rs` → `N API RS`；还不过再整词换相近发音的中文）→ `check tts-text` → `tts --retry` → `asr --only <该句号>` |
 | `pages.json 不连续` | 重跑 `$HV pages <slug>`，别手改 from/to |
 | `script.md 页数与 slides 不一致` | 补页或删页，重跑 `$HV check script` |
 | 脚本念着别扭、有语病 | `check script` 查不出来；回 §2 的通顺检查逐段重读，改完连带重做 `speech.md` → `pages` → `speech.tts.md` |

@@ -49,6 +49,9 @@ pub struct Args {
     /// the batch median (0 disables the check)
     #[arg(long, default_value_t = 0.25)]
     pub rate_tolerance: f64,
+    /// silence at the head of the track, so the video opens with a beat before speech
+    #[arg(long, default_value_t = 1000)]
+    pub lead_in_ms: u64,
 }
 
 pub(crate) fn parse_only(only: Option<&str>) -> Result<Option<Vec<usize>>> {
@@ -420,7 +423,11 @@ pub fn run(args: Args) -> Result<()> {
     let mut writer = hound::WavWriter::create(&full_path, spec)
         .with_context(|| format!("cannot write {}", full_path.display()))?;
     let mut entries: Vec<Value> = Vec::new();
-    let mut cursor: u64 = 0;
+    let lead_frames = SAMPLE_RATE as u64 * args.lead_in_ms / 1000;
+    for _ in 0..lead_frames {
+        writer.write_sample(0i16)?;
+    }
+    let mut cursor: u64 = lead_frames;
     let page_starts = page_start_indexes(&root);
     let ms = |frames: u64| (frames as f64 * 1000.0 / SAMPLE_RATE as f64).round() as u64;
 
@@ -509,6 +516,7 @@ pub fn run(args: Args) -> Result<()> {
         "trimmed": trim_needs,
         "rate_retried": redo,
         "full": full_path.display().to_string(),
+        "lead_in_ms": args.lead_in_ms,
         "duration_ms": total_ms,
         "srt": srt_path.display().to_string(),
     }));
