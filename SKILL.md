@@ -323,17 +323,24 @@ $HV asr <slug>
 
 工具用 Fun-ASR-Nano 逐句转录 `voice/sent-NNNN.wav`，和 `speech.tts.md` 对应行比对（去掉标点、阿拉伯数字按位转中文读法后算相似度），写出 `voice/asr.json`。
 
+- `--only 3,7`（逗号分隔句号）只转录这几句，不重跑全量；结果合并进 `voice/asr.json`，其余句子保留上次记录。**重查问题音频一律带 `--only`**，模型加载 20 秒一次，别为两句把整片重新转录一遍。
 - 全部相似度 ≥ `--min-similarity`（默认 0.85）才 `ok: true`。
 - 不一致的句子记进 `voice/asr-retry.json`，并把当前音频拷到 `voice/bad/sent-NNNN-<第几次>.wav` 存档排错，**这两样都不删**。
 - 有 `mismatched` 时命令以非零退出，接着重合成，再回听，直到全部通过：
 
 ```bash
 $HV tts <slug> --retry --voice $SKILL/assets/cloned-voice.wav
-$HV asr <slug>
+$HV asr <slug> --only <刚重合成的句号>
 ```
 
+- 退出码看的是 `voice/asr-retry.json` 整体：`--only` 没覆盖到的旧问题句仍留在里面，照样非零退出，不会被悄悄放过。
 - `--retry` 只重合成 `voice/asr-retry.json` 里的句子（自动 force）；重合成后再跑 `asr`，能对上就自动从文件里移除，`entries` 清空才算过。
-- 同一句重试 3 轮仍不过：先看 `voice/bad/` 里的存档，读 `voice/asr.json` 的 `asr_text`。是 ASR 听错（同音字、专名）就改 `speech.tts.md` 的读法重跑 `check tts-text`，必要时用 `--min-similarity` 放宽；不要直接 `state done tts` 蒙过去。
+- 首次全量 `asr` 之后，回环只跑单句 `--only`；只有 `speech.tts.md` 大面积重写、或 `asr.json` 缺失时才重跑全量。
+- 同一句重试 3 轮仍不过：先看 `voice/bad/` 里的存档，读 `voice/asr.json` 的 `asr_text`，判断是 ASR 听错还是 TTS 读糊（中文部分逐字对上、只崩英文标识符 = ASR 英文转写缺陷，属听错）。是听错就改 `speech.tts.md` 的读法：
+  - **英文标识符整词换成相近发音的中文**：TTS 念中文、ASR 也转中文，同语种才能对上。如 `napi-rs` → `纳皮尔斯`、`WASM` → `瓦森姆`、`oxc` → `奥克斯`、`VoidZero` → 中文音译。只做拆词/改大小写（`napi rs`、`wasm`、`TS Transformer`）无效，英文在 ASR 侧仍转成随机的英文或音译字，相似度反而更低。字幕仍来自 `speech.md`，改的只是配音稿。
+  - **问题语句重构**：ASR 总在同一处断错、把句子听成两截的，调整该行断句或换同义说法，让口语更顺（不改语义、不增删内容）。
+  - 改完必须重跑 `check tts-text`（`digits_left`、`paragraph_mismatch` 必须为空），再 `$HV tts <slug> --retry` 重合成该句，再 `$HV asr <slug> --only <该句号>`。
+  - 反复仍不过才用 `--min-similarity` 放宽；不要直接 `state done tts` 蒙过去。
 - 只有 `asr` 全绿（或人工逐条听过 `voice/bad/` 里剩下的句子）才能继续。
 
 `$HV state done <slug> tts`
@@ -368,7 +375,7 @@ $HV verify <slug>
 - 每个审核点结束后必须 `read` 重读被审文件，没重读就不许 `state done`、不许往下走。
 - 页时间只能落在句边界上，不按字数估算。
 - 成片不烧字幕；`final.srt` 是给用户后期用的，不要在 ffmpeg 里加 `subtitles`。
-- 每句合成音频都要过 `$HV asr` 回听校验；`voice/asr-retry.json` 非空就不许 `state done tts`、不许 `compose`。
+- 每句合成音频都要过 `$HV asr` 回听校验；重查只带 `--only` 跑出问题的那几句；`voice/asr-retry.json` 非空就不许 `state done tts`、不许 `compose`。
 - `voice/bad/` 里的存档是排错证据，校验通过也不删。
 - 截图只走 `$HV screenshot`，不许换浏览器、不许用 playwright 兜底。
 - 截图后必须逐张看图确认高亮颜色与布局；有不合格的就改 `index.html` 重截，不许直接进 `script`。
@@ -384,7 +391,7 @@ $HV verify <slug>
 | `缺少克隆音色参考音频` | 把参考音频放到 `$SKILL/assets/cloned-voice.wav`，或 `--voice` 指定 |
 | `模型目录无效` | `--model-dir ~/models/VoxCPM2` 或设 `VOXCPM_MODEL_DIR` |
 | `invalid asr model directory` | 缺 `~/models/Fun-ASR-Nano-2512/model.pt` 或 `Qwen3-0.6B/tokenizer.json`，补齐或 `--model-dir` / `FUNASR_MODEL_DIR` |
-| `sentences do not match the script` | 跑 `$HV tts <slug> --retry` 重合成，再跑 `$HV asr`；反复不过看 `voice/bad/` 与 `asr.json` 的 `asr_text` |
+| `sentences do not match the script` | 跑 `$HV tts <slug> --retry` 重合成，再 `$HV asr <slug> --only <报出的句号>`（只转录这几句）；反复不过看 `voice/bad/` 与 `asr.json` 的 `asr_text` |
 | `no sentence queued in voice/asr-retry.json` | 先跑 `$HV asr`，还没校验就没有待重合成的句子 |
 | `review-speech 未完成` | 先人工审完 `speech.md`，再 `$HV state done <slug> review-speech` |
 | `sentence split does not follow the two-level rule` | 按两级切分重排：先把一行里多出来的 `。！？` 拆开（`split_at_sentence_end`），再把超过 20 字符、且有合适逗号类断点的句子拆开（`split_at_clause_break`，顿号不算） |
@@ -393,6 +400,7 @@ $HV verify <slug>
 | `speech.md and speech.tts.md line counts differ` | 违反审核点铁律：用户在 `review-speech` 改过 `speech.md`，但没重读重做 `speech.tts.md`。重读 `speech.md` → 重做 `speech.tts.md` → `check tts-text` |
 | `digits_left` 非空 | `speech.tts.md` 还有阿拉伯数字，改中文读法 |
 | 数字读法念错（如 `20` 变 `二零`、`105` 变 `一百五`） | `check tts-text` 查不出来；回 §6 做二次检查，按数量/编号分类重写那几行，再重跑 `check tts-text` |
+| `asr` 卡在英文标识符句（`napi-rs`、`WASM`、`ts.Transformer` 相似度低） | ASR 英文转写缺陷，非读错；回 §7 改 `speech.tts.md` 读法（英文整词换相近发音的中文 / 重构语句）→ `check tts-text` → `tts --retry` → `asr --only <该句号>` |
 | `pages.json 不连续` | 重跑 `$HV pages <slug>`，别手改 from/to |
 | `script.md 页数与 slides 不一致` | 补页或删页，重跑 `$HV check script` |
 | 脚本念着别扭、有语病 | `check script` 查不出来；回 §2 的通顺检查逐段重读，改完连带重做 `speech.md` → `pages` → `speech.tts.md` |

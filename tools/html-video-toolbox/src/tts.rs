@@ -51,7 +51,7 @@ pub struct Args {
     pub rate_tolerance: f64,
 }
 
-fn parse_only(only: Option<&str>) -> Result<Option<Vec<usize>>> {
+pub(crate) fn parse_only(only: Option<&str>) -> Result<Option<Vec<usize>>> {
     let Some(only) = only else { return Ok(None) };
     let indexes: Vec<usize> = only
         .split(',')

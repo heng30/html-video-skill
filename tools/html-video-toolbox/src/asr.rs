@@ -21,6 +21,9 @@ pub struct Args {
     /// sentences below this similarity are queued for re-synthesis
     #[arg(long, default_value_t = DEFAULT_MIN_SIMILARITY)]
     pub min_similarity: f64,
+    /// transcribe only these sentence indexes, comma separated
+    #[arg(long)]
+    pub only: Option<String>,
 }
 
 fn resolve_model_dir(cli: Option<PathBuf>) -> Result<PathBuf> {
@@ -239,6 +242,14 @@ pub fn similarity(expected: &str, heard: &str) -> f64 {
     ))
 }
 
+/// `--only` 只写入本次转录的几句，其余句子上次的记录保留。
+fn merge_results(mut base: Vec<Value>, fresh: Vec<Value>) -> Vec<Value> {
+    base.retain(|old| !fresh.iter().any(|new| new["index"] == old["index"]));
+    base.extend(fresh);
+    base.sort_by_key(|item| item["index"].as_u64().unwrap_or(0));
+    base
+}
+
 fn retry_file(root: &Path) -> PathBuf {
     root.join("voice/asr-retry.json")
 }
@@ -278,6 +289,18 @@ pub fn run(args: Args) -> Result<()> {
     if lines.is_empty() {
         bail!("speech.tts.md has no sentence");
     }
+    let only = crate::tts::parse_only(args.only.as_deref())?;
+    if let Some(set) = &only {
+        for index in set {
+            if !lines.iter().any(|line| line.index == *index) {
+                bail!("no sentence {index} in speech.tts.md");
+            }
+        }
+    }
+    let selected: Vec<&text::Sentence> = lines
+        .iter()
+        .filter(|line| only.as_ref().is_none_or(|set| set.contains(&line.index)))
+        .collect();
     let voice_dir = root.join("voice");
     let model_dir = resolve_model_dir(args.model_dir.clone())?;
     let weights = model_dir.join("model.pt");
@@ -298,7 +321,7 @@ pub fn run(args: Args) -> Result<()> {
     eprintln!(
         "loading asr model {} ({} sentences to transcribe)",
         model_dir.display(),
-        lines.len()
+        selected.len()
     );
     let mut model = FunAsrNanoGenerateModel::new(config, None, None)
         .map_err(|e| anyhow!("asr load failed: {e}"))?;
@@ -306,9 +329,8 @@ pub fn run(args: Args) -> Result<()> {
     let path = retry_file(&root);
     let mut retry = load_retry(&path)?;
     let mut results: Vec<Value> = Vec::new();
-    let mut failed: Vec<usize> = Vec::new();
 
-    for line in &lines {
+    for line in &selected {
         let index = line.index;
         let key = index.to_string();
         let wav = voice_dir.join(format!("sent-{index:04}.wav"));
@@ -337,7 +359,6 @@ pub fn run(args: Args) -> Result<()> {
                 entries.remove(&key);
             }
         } else {
-            failed.push(index);
             let attempts = retry["entries"][&key]["attempts"].as_u64().unwrap_or(0) + 1;
             let bad = voice_dir.join(format!("bad/sent-{index:04}-{attempts}.wav"));
             if let Some(parent) = bad.parent() {
@@ -362,21 +383,32 @@ pub fn run(args: Args) -> Result<()> {
         }));
     }
 
+    let failed = retry_indexes(&root)?;
+    let report_path = voice_dir.join("asr.json");
+    let base = if only.is_some() && report_path.is_file() {
+        read_json(&report_path)?["sentences"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
     let report = json!({
         "ok": failed.is_empty(),
         "model_dir": model_dir.display().to_string(),
         "min_similarity": args.min_similarity,
-        "sentences": results,
+        "sentences": merge_results(base, results),
         "retry": failed,
     });
-    write_json(&voice_dir.join("asr.json"), &report)?;
+    write_json(&report_path, &report)?;
     write_json(&path, &retry)?;
     print_json(&json!({
         "ok": failed.is_empty(),
         "sentences": lines.len(),
+        "transcribed": selected.len(),
         "mismatched": failed,
         "retry_file": path.display().to_string(),
-        "report": voice_dir.join("asr.json").display().to_string(),
+        "report": report_path.display().to_string(),
     }));
     if !failed.is_empty() {
         bail!(
@@ -398,6 +430,16 @@ mod tests {
 
     fn sim(expected: &str, heard: &str) -> f64 {
         similarity(expected, heard)
+    }
+
+    #[test]
+    fn only_run_keeps_previous_sentences() {
+        let base = vec![json!({ "index": 1, "ok": false }), json!({ "index": 2, "ok": true })];
+        let fresh = vec![json!({ "index": 2, "ok": false })];
+        let merged = merge_results(base, fresh);
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0]["ok"], json!(false));
+        assert_eq!(merged[1]["ok"], json!(false));
     }
 
     #[test]
