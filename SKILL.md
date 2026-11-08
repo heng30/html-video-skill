@@ -302,12 +302,14 @@ $HV check tts-text <slug>
 ## 7 · tts
 
 ```bash
-$HV tts <slug> --gui --voice $SKILL/assets/cloned-voice.wav
+$HV tts <slug> --gpu --voice $SKILL/assets/cloned-voice.wav
 ```
+
+**必须先用 `--gpu` 跑；日志出现 wgpu 初始化/加载失败或进程报错退出时，才去掉 `--gpu` 回退 CPU 重跑同一条命令**（不加 `--gpu` 即默认 CPU `flex` 后端）。成功标志是日志出现 `loading model ... on wgpu/gpu`，随后逐句 `[N/M]`；回退 CPU 时对应 `on flex/cpu`。
 
 命令耗时以十分钟计，**丢后台跑**，不要前台阻塞。
 
-可选：`--model-dir <dir>`、`--gpu`（用 wgpu GPU 后端合成，不加则默认 CPU `flex` 后端）、`--force`（全量重合成）、`--only 1,3,5`（只处理这几句）、`--retry`（只重合成 `voice/asr-retry.json` 里的句子）、`--cfg` / `--steps` / `--max-len`（生成参数）、`--rate-tolerance`（语速离群重做阈值，默认 0.25，0 关闭）。工具一次加载模型，逐句合成，裁剪每句首尾静默（句首 ≤50ms、句尾 ≤120ms，-40dB），合成后按每字时长中位数把语速偏离超过阈值的句子换噪声重做（最多 2 次，只留更接近中位的一次），按句间 150ms、段间 400ms、页间 800ms（给翻页音效留静默）拼接，写出 `voice/full.wav`、`voice/timeline.json`、`voice/manifest.json`、`subs/final.srt`。
+可选：`--model-dir <dir>`、`--force`（全量重合成）、`--only 1,3,5`（只处理这几句）、`--retry`（只重合成 `voice/asr-retry.json` 里的句子）、`--cfg` / `--steps` / `--max-len`（生成参数）、`--rate-tolerance`（语速离群重做阈值，默认 0.25，0 关闭）。工具一次加载模型，逐句合成，裁剪每句首尾静默（句首 ≤50ms、句尾 ≤120ms，-40dB），合成后按每字时长中位数把语速偏离超过阈值的句子换噪声重做（最多 2 次，只留更接近中位的一次），按句间 150ms、段间 400ms、页间 800ms（给翻页音效留静默）拼接，写出 `voice/full.wav`、`voice/timeline.json`、`voice/manifest.json`、`subs/final.srt`。
 
 - 音色缺失会直接报错停下，补好 `assets/cloned-voice.wav` 后重跑同一条命令（或设 `VOICE_CLONE_WAV`）。
 - 断点粒度是句子：`speech.tts.md` 某行不变就跳过该句；只改了几句就只重合成那几句。
@@ -396,4 +398,5 @@ $HV verify <slug>
 | 脚本念着别扭、有语病 | `check script` 查不出来；回 §2 的通顺检查逐段重读，改完连带重做 `speech.md` → `pages` → `speech.tts.md` |
 | `speech.md 段落数与 script.md 不一致` | 按页重新分句，重跑 `$HV pages` |
 | `ffmpeg 合成失败` | 看 stderr；多半是图片路径或 concat 列表 |
+| `wgpu` 后端加载/初始化失败 | 去掉 `--gpu` 回退 CPU 重跑同一命令；已合成的句子不重跑 |
 | 合成太慢 | 正常：CPU 推理 4.3GB 模型；已合成的句子不会重跑 |

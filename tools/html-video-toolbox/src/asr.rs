@@ -154,7 +154,17 @@ fn normalize(text: &str, style: NumStyle) -> String {
                         i += 1;
                     }
                     d @ '０'..='９' => {
-                        integer.push(char::from_u32('0' as u32 + (d as u32 - '０' as u32)).unwrap());
+                        integer
+                            .push(char::from_u32('0' as u32 + (d as u32 - '０' as u32)).unwrap());
+                        i += 1;
+                    }
+                    ',' | '，'
+                        if i + 3 < chars.len()
+                            && chars[i + 1].is_ascii_digit()
+                            && chars[i + 2].is_ascii_digit()
+                            && chars[i + 3].is_ascii_digit()
+                            && !integer.ends_with(',') =>
+                    {
                         i += 1;
                     }
                     _ => break,
@@ -185,6 +195,7 @@ fn normalize(text: &str, style: NumStyle) -> String {
             out.push(match c.to_ascii_lowercase() {
                 '两' => '二',
                 '〇' => '零',
+                '他' | '她' => '它',
                 other => other,
             });
         }
@@ -221,8 +232,11 @@ fn similarity_once(expected: &str, heard: &str, style: NumStyle) -> f64 {
 
 /// 数量读法与逐位读法各算一次，取较高者：`85` 念八十五、`270M` 念二七零M 都能对上。
 pub fn similarity(expected: &str, heard: &str) -> f64 {
-    similarity_once(expected, heard, NumStyle::Numeric)
-        .max(similarity_once(expected, heard, NumStyle::Digits))
+    similarity_once(expected, heard, NumStyle::Numeric).max(similarity_once(
+        expected,
+        heard,
+        NumStyle::Digits,
+    ))
 }
 
 fn retry_file(root: &Path) -> PathBuf {
@@ -395,6 +409,8 @@ mod tests {
         assert!(sim("Gemma 三 二七零 M", "Gemma 3 270M") > 0.9);
         assert!(sim("十三点八", "13.8") > 0.9);
         assert!(sim("八亿参数", "800000000 参数") > 0.9);
+        assert!(sim("一万七千个权重", "17,000个权重") > 0.95);
+        assert!(sim("它找得到差异", "他找得到差异") > 0.99);
         assert!(sim("四猜四中", "试拆示众") < 0.5);
     }
 }
