@@ -46,22 +46,151 @@ fn digit_cn(c: char) -> char {
     }
 }
 
-/// 只留字母/数字/汉字：阿拉伯数字逐位转中文，避免「2024 年」和「二零二四年」判成不一致。
-/// shortcut: 十 vs 10、大小写英文缩写仍可能误判，靠 --min-similarity 放宽。
-fn normalize(text: &str) -> String {
-    text.chars()
-        .filter_map(|c| match c {
-            '0'..='9' => Some(digit_cn(c)),
-            '０'..='９' => char::from_u32('0' as u32 + (c as u32 - '０' as u32)).map(digit_cn),
-            c if c.is_alphanumeric() => Some(c.to_ascii_lowercase()),
+/// 数字读法：Numeric 按数值（85→八十五），Digits 逐位（270M→二七零M）。
+#[derive(Clone, Copy, PartialEq)]
+enum NumStyle {
+    Numeric,
+    Digits,
+}
+
+fn cn_digits(int_part: &str) -> String {
+    int_part.chars().map(digit_cn).collect()
+}
+
+/// 一组四位以内数字，前导零已去掉。
+fn cn_group(group: &str) -> String {
+    const UNITS: [&str; 4] = ["", "十", "百", "千"];
+    let digits: Vec<u32> = group.chars().map(|c| c as u32 - '0' as u32).collect();
+    let mut out = String::new();
+    let mut zero = false;
+    for (i, d) in digits.iter().enumerate() {
+        let pos = digits.len() - 1 - i;
+        if *d == 0 {
+            zero = true;
+            continue;
+        }
+        if zero && !out.is_empty() {
+            out.push('零');
+        }
+        zero = false;
+        out.push(digit_cn(char::from_digit(*d, 10).unwrap_or('0')));
+        out.push_str(UNITS[pos]);
+    }
+    out
+}
+
+/// 数值读法：85 → 八十五、32000 → 三万二千、13 → 十三。超过 12 位退回逐位。
+fn cn_numeric(int_part: &str) -> String {
+    let trimmed = int_part.trim_start_matches('0');
+    if trimmed.is_empty() {
+        return "零".to_string();
+    }
+    if int_part.starts_with('0') || trimmed.len() > 12 {
+        return cn_digits(int_part);
+    }
+    const GROUPS: [&str; 4] = ["", "万", "亿", "万亿"];
+    let mut chunks: Vec<String> = trimmed
+        .as_bytes()
+        .rchunks(4)
+        .map(|chunk| String::from_utf8_lossy(chunk).to_string())
+        .collect();
+    chunks.reverse();
+    let total = chunks.len();
+    let mut out = String::new();
+    let mut pending_zero = false;
+    for (i, chunk) in chunks.iter().enumerate() {
+        let digits = chunk.trim_start_matches('0');
+        if digits.is_empty() {
+            if !out.is_empty() {
+                pending_zero = true;
+            }
+            continue;
+        }
+        if !out.is_empty() && (pending_zero || digits.len() < 4) {
+            out.push('零');
+        }
+        pending_zero = false;
+        out.push_str(&cn_group(digits));
+        out.push_str(GROUPS[total - 1 - i]);
+    }
+    if out.starts_with("一十") {
+        out.remove(0);
+    }
+    out
+}
+
+fn cn_number(integer: &str, fraction: &str, style: NumStyle) -> String {
+    let head = match style {
+        NumStyle::Numeric => cn_numeric(integer),
+        NumStyle::Digits => cn_digits(integer),
+    };
+    if fraction.is_empty() {
+        head
+    } else {
+        format!("{head}点{}", cn_digits(fraction))
+    }
+}
+
+/// 只留字母/数字/汉字：阿拉伯数字转中文读法（`%` → 百分之，小数点 → 点），
+/// 避免「8.5%」和「百分之八点五」判成不一致。两种读法各算一次相似度，取较高者。
+fn normalize(text: &str, style: NumStyle) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::new();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        let digit = match c {
+            '0'..='9' => Some(c),
+            '０'..='９' => char::from_u32('0' as u32 + (c as u32 - '０' as u32)),
             _ => None,
-        })
-        .map(|c| match c {
-            '两' => '二',
-            '〇' => '零',
-            other => other,
-        })
-        .collect()
+        };
+        if let Some(first) = digit {
+            let mut integer = String::from(first);
+            i += 1;
+            while i < chars.len() {
+                match chars[i] {
+                    d @ '0'..='9' => {
+                        integer.push(d);
+                        i += 1;
+                    }
+                    d @ '０'..='９' => {
+                        integer.push(char::from_u32('0' as u32 + (d as u32 - '０' as u32)).unwrap());
+                        i += 1;
+                    }
+                    _ => break,
+                }
+            }
+            let mut fraction = String::new();
+            if i + 1 < chars.len() && chars[i] == '.' && chars[i + 1].is_ascii_digit() {
+                i += 1;
+                while i < chars.len() && chars[i].is_ascii_digit() {
+                    fraction.push(chars[i]);
+                    i += 1;
+                }
+            }
+            let percent = i < chars.len() && chars[i] == '%';
+            if percent {
+                i += 1;
+            }
+            let number = cn_number(&integer, &fraction, style);
+            if percent {
+                out.push_str("百分之");
+            }
+            out.push_str(&number);
+            continue;
+        }
+        if c == '%' {
+            out.push_str("百分之");
+        } else if c.is_alphanumeric() {
+            out.push(match c.to_ascii_lowercase() {
+                '两' => '二',
+                '〇' => '零',
+                other => other,
+            });
+        }
+        i += 1;
+    }
+    out
 }
 
 fn edit_distance(left: &[char], right: &[char]) -> usize {
@@ -80,14 +209,20 @@ fn edit_distance(left: &[char], right: &[char]) -> usize {
     previous[right.len()]
 }
 
-pub fn similarity(expected: &str, heard: &str) -> f64 {
-    let left: Vec<char> = normalize(expected).chars().collect();
-    let right: Vec<char> = normalize(heard).chars().collect();
+fn similarity_once(expected: &str, heard: &str, style: NumStyle) -> f64 {
+    let left: Vec<char> = normalize(expected, style).chars().collect();
+    let right: Vec<char> = normalize(heard, style).chars().collect();
     let longest = left.len().max(right.len());
     if longest == 0 {
         return 1.0;
     }
     1.0 - edit_distance(&left, &right) as f64 / longest as f64
+}
+
+/// 数量读法与逐位读法各算一次，取较高者：`85` 念八十五、`270M` 念二七零M 都能对上。
+pub fn similarity(expected: &str, heard: &str) -> f64 {
+    similarity_once(expected, heard, NumStyle::Numeric)
+        .max(similarity_once(expected, heard, NumStyle::Digits))
 }
 
 fn retry_file(root: &Path) -> PathBuf {
@@ -241,4 +376,25 @@ pub fn run(args: Args) -> Result<()> {
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sim(expected: &str, heard: &str) -> f64 {
+        similarity(expected, heard)
+    }
+
+    #[test]
+    fn numbers_match_across_readings() {
+        assert!(sim("八十五道耗尽三万二千个 token", "85道耗尽32000个TOKEN") > 0.9);
+        assert!(sim("百分之八点五", "8.5%") > 0.9);
+        assert!(sim("百分之零点零一六", "0.016%") > 0.9);
+        assert!(sim("一千零二十四局", "1024局") > 0.9);
+        assert!(sim("Gemma 三 二七零 M", "Gemma 3 270M") > 0.9);
+        assert!(sim("十三点八", "13.8") > 0.9);
+        assert!(sim("八亿参数", "800000000 参数") > 0.9);
+        assert!(sim("四猜四中", "试拆示众") < 0.5);
+    }
 }

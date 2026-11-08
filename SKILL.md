@@ -12,6 +12,8 @@ disable-model-invocation: true
 
 **耗时预期**：VoxCPM2 在本机 CPU 上加载约 1.5–2 分钟，每句合成约 1–2 分钟。10 分钟成片按 1–2 小时估。先合成 1–2 句试听，再跑全量。回听校验（`asr`）另算：模型加载约 20 秒，每句再多几秒。
 
+**`tts` / `asr` 一律丢后台跑**（`background_bash`），别占着前台等；启动后用 `read_process_output` 轮询进度，等日志出现完成标志或进程退出再看结果。
+
 | 步骤 | 产物 | 谁做 |
 |---|---|---|
 | `fetch` | `url`、`article.md`、`title.md`、`images/` | agent |
@@ -283,6 +285,8 @@ $HV check tts-text <slug>
 ```bash
 $HV tts <slug> --gui --voice $SKILL/assets/cloned-voice.wav
 ```
+
+命令耗时以十分钟计，**丢后台跑**，不要前台阻塞。
 
 可选：`--model-dir <dir>`、`--gpu`（用 wgpu GPU 后端合成，不加则默认 CPU `flex` 后端）、`--force`（全量重合成）、`--only 1,3,5`（只处理这几句）、`--retry`（只重合成 `voice/asr-retry.json` 里的句子）、`--cfg` / `--steps` / `--max-len`（生成参数）。工具一次加载模型，逐句合成，裁剪每句首尾静默（句首 ≤50ms、句尾 ≤120ms，-40dB），按句间 150ms、段间 400ms 拼接，写出 `voice/full.wav`、`voice/timeline.json`、`voice/manifest.json`、`subs/final.srt`。
 
