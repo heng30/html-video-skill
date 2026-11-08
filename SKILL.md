@@ -12,6 +12,8 @@ disable-model-invocation: true
 
 **耗时预期**：VoxCPM2 在本机 CPU 上加载约 1.5–2 分钟，每句合成约 1–2 分钟。10 分钟成片按 1–2 小时估。先合成 1–2 句试听，再跑全量。回听校验（`asr`）另算：模型加载约 20 秒，每句再多几秒。
 
+**人工审核点铁律**：每个审核点（`review-script`、`review-speech`）用户说"看过了/没问题"之后，**第一步必须用 `read` 重新完整读取被审文件**（`script.md` / `speech.md`），以磁盘上的内容为准；不许用上下文里的旧副本，不许只凭"用户说没问题"就直接往下走。用户很可能直接改了文件——不重读 = 审核白做，下游全按旧内容生产。
+
 **`tts` / `asr` 一律丢后台跑**（`background_bash`），别占着前台等；启动后用 `read_process_output` 轮询进度，等日志出现完成标志或进程退出再看结果。
 
 | 步骤 | 产物 | 谁做 |
@@ -200,7 +202,9 @@ $HV check script <slug>
 - 有没有漏页、重复、跨页
 - 事实、数字、语气是否要改
 
-**用户确认后，先重新读取 `script.md` 最新内容**（用户可能直接改过文件），再：
+**用户确认后，第一步：用 `read` 重新读取整个 `script.md`**（不要用上下文里的旧版本，也不要只看用户贴的片段）。读到的内容与上下文不一致时，以文件为准，按上面 `script` 步骤的规则重跑 `$HV check script` 并同步下游（`speech.md` → `pages` → `check speech` → `speech.tts.md` → `check tts-text`）。
+
+确认与磁盘内容一致后，再：
 
 ```bash
 $HV state done <slug> review-script
@@ -211,8 +215,11 @@ $HV state done <slug> review-script
 把 `script.md` 逐页分句，写 `speech.md`：
 
 - 每页一段，段间空行；段落数必须等于 `script.md` 的页数
-- 一行一句；`，`、`；`、`：`、`。`、`！`、`？` 皆是断点（顿号不是，保留短语连读）；每行以标点结尾
-- 每行内容只增断行、不改字，拼接后与 `script.md` 对应段逐字一致；不强制字数上限
+- 一行一句，**分两级切**：
+  1. 先在句末标点断（`。`、`！`、`？`、`……`），得到完整的一句话；行内不许再出现句末标点
+  2. 这一句超过 **20 个字符**时，才在这句里面找次级断点（`，`、`；`、`：`、破折号 `—`；顿号 `、` 不算，它只分隔词组）切一次；优先选靠中间的断点，切开后两边都至少 6 字符
+  3. 超过 20 字符但找不到合适的次级断点，就整句留着，不要为了凑长度硬切、也不要切出「但是，」这种碎片
+- 每行以标点结尾；只增断行、不改字，拼接后与 `script.md` 对应段逐字一致
 - 不让分句跨页；数字保持阿拉伯形式；句末标点保留
 - 不要产生只含标点的句子
 
@@ -230,7 +237,7 @@ $HV pages <slug>
 $HV check speech <slug>
 ```
 
-`ok: true` 才算过。`mode` 为 `same-language` 时 `error` 表示拼不回原文；`mode` 为 `translated` 时只检查中文。`longest` 只是参考，不阻断。
+`ok: true` 才算过。`mode` 为 `same-language` 时 `error` 表示拼不回原文；`mode` 为 `translated` 时只检查中文；`sentence split does not follow the two-level rule` 表示分句层次不对（`split_at_sentence_end` = 该在句末标点拆、`split_at_clause_break` = 超长该在逗号类断点二次拆）。`longest` 只是参考，不阻断。
 
 **完成即停，不要继续 `tts-text`。** 下一步是人工审查。
 
@@ -244,7 +251,9 @@ $HV check speech <slug>
 - 译文是否准确、有没有漏译或错译
 - 数字是否保留阿拉伯数字、`pages.json` 的页边界是否合理
 
-**用户确认后，先重新读取 `speech.md` 最新内容**（用户可能直接改过；若改了，重跑 `$HV pages` 与 `check speech`），再：
+**用户确认后，第一步：用 `read` 重新读取整个 `speech.md`**（不要用上下文里的旧版本）。内容有变就以文件为准：重跑 `$HV pages`、`$HV check speech`，并**重做 `speech.tts.md`**（它逐行对应 `speech.md`，行数和行序都会变），再 `$HV check tts-text`。
+
+确认与磁盘内容一致后，再：
 
 ```bash
 $HV state done <slug> review-speech
@@ -298,7 +307,7 @@ $HV tts <slug> --gui --voice $SKILL/assets/cloned-voice.wav
 
 命令耗时以十分钟计，**丢后台跑**，不要前台阻塞。
 
-可选：`--model-dir <dir>`、`--gpu`（用 wgpu GPU 后端合成，不加则默认 CPU `flex` 后端）、`--force`（全量重合成）、`--only 1,3,5`（只处理这几句）、`--retry`（只重合成 `voice/asr-retry.json` 里的句子）、`--cfg` / `--steps` / `--max-len`（生成参数）、`--rate-tolerance`（语速离群重做阈值，默认 0.25，0 关闭）。工具一次加载模型，逐句合成，裁剪每句首尾静默（句首 ≤50ms、句尾 ≤120ms，-40dB），合成后按每字时长中位数把语速偏离超过阈值的句子换噪声重做（最多 2 次，只留更接近中位的一次），按句间 150ms、段间 400ms 拼接，写出 `voice/full.wav`、`voice/timeline.json`、`voice/manifest.json`、`subs/final.srt`。
+可选：`--model-dir <dir>`、`--gpu`（用 wgpu GPU 后端合成，不加则默认 CPU `flex` 后端）、`--force`（全量重合成）、`--only 1,3,5`（只处理这几句）、`--retry`（只重合成 `voice/asr-retry.json` 里的句子）、`--cfg` / `--steps` / `--max-len`（生成参数）、`--rate-tolerance`（语速离群重做阈值，默认 0.25，0 关闭）。工具一次加载模型，逐句合成，裁剪每句首尾静默（句首 ≤50ms、句尾 ≤120ms，-40dB），合成后按每字时长中位数把语速偏离超过阈值的句子换噪声重做（最多 2 次，只留更接近中位的一次），按句间 150ms、段间 400ms、页间 800ms（给翻页音效留静默）拼接，写出 `voice/full.wav`、`voice/timeline.json`、`voice/manifest.json`、`subs/final.srt`。
 
 - 音色缺失会直接报错停下，补好 `assets/cloned-voice.wav` 后重跑同一条命令（或设 `VOICE_CLONE_WAV`）。
 - 断点粒度是句子：`speech.tts.md` 某行不变就跳过该句；只改了几句就只重合成那几句。
@@ -333,7 +342,7 @@ $HV asr <slug>
 $HV compose <slug>
 ```
 
-按 `pages.json` 每页图显示到「下一页第一句开始前 200ms」，首页从 0、末页到音轨结束；挂 `voice/full.wav`，导出**不带字幕**的 `final.mp4`，同时把 `subs/final.srt` 复制成 `final.srt`。用户随后在剪辑器里自行导入字幕并精修。
+按 `pages.json` 每页图显示到「下一页第一句开始前 200ms」，首页从 0、末页到音轨结束；挂 `voice/full.wav`，导出**不带字幕**的 `final.mp4`，同时把 `subs/final.srt` 复制成 `final.srt`。每次翻页（除首页外每页切点）叠一次 `assets/page-flip.mp3` 翻页音效（音量 `--flip-gain`，默认 0.5，0 关闭）：音效末尾对齐切页点、整段落在 `tts` 留的页间静默里，不盖人声；页间静默不足 0.55s 时报警告，用 `tts --force` 重跑音轨。音效内置在二进制里，混音写临时轨、不改 `voice/full.wav`，音轨总长与字幕时间轴不变（页间静默本来就写进 `timeline.json` 与 `subs/final.srt`）。用户随后在剪辑器里自行导入字幕并精修。
 
 `$HV state done <slug> compose`
 
@@ -354,6 +363,7 @@ $HV verify <slug>
 - `article.md` 保留原文语言，不翻译；翻译只发生在 `speech.md`。
 - 数字读法分两类：数量按数值（二十），年份/编号逐位（二零二四）；`speech.tts.md` 写完必须做二次检查，按数字类型逐处核对读法。
 - 不改原文、不编内容；分句校验不过就不许进配音。
+- 每个审核点结束后必须 `read` 重读被审文件，没重读就不许 `state done`、不许往下走。
 - 页时间只能落在句边界上，不按字数估算。
 - 成片不烧字幕；`final.srt` 是给用户后期用的，不要在 ffmpeg 里加 `subtitles`。
 - 每句合成音频都要过 `$HV asr` 回听校验；`voice/asr-retry.json` 非空就不许 `state done tts`、不许 `compose`。
@@ -375,8 +385,10 @@ $HV verify <slug>
 | `sentences do not match the script` | 跑 `$HV tts <slug> --retry` 重合成，再跑 `$HV asr`；反复不过看 `voice/bad/` 与 `asr.json` 的 `asr_text` |
 | `no sentence queued in voice/asr-retry.json` | 先跑 `$HV asr`，还没校验就没有待重合成的句子 |
 | `review-speech 未完成` | 先人工审完 `speech.md`，再 `$HV state done <slug> review-speech` |
+| `sentence split does not follow the two-level rule` | 按两级切分重排：先把一行里多出来的 `。！？` 拆开（`split_at_sentence_end`），再把超过 20 字符、且有合适逗号类断点的句子拆开（`split_at_clause_break`，顿号不算） |
 | `分句拼不回 article.md` | 仅同语言时出现：`article.md` 混进了标题/导航，或分句时改了字 |
 | `有句子不是中文` | `speech.md` 漏译或出现了纯标点行 |
+| `speech.md and speech.tts.md line counts differ` | 违反审核点铁律：用户在 `review-speech` 改过 `speech.md`，但没重读重做 `speech.tts.md`。重读 `speech.md` → 重做 `speech.tts.md` → `check tts-text` |
 | `digits_left` 非空 | `speech.tts.md` 还有阿拉伯数字，改中文读法 |
 | 数字读法念错（如 `20` 变 `二零`、`105` 变 `一百五`） | `check tts-text` 查不出来；回 §6 做二次检查，按数量/编号分类重写那几行，再重跑 `check tts-text` |
 | `pages.json 不连续` | 重跑 `$HV pages <slug>`，别手改 from/to |

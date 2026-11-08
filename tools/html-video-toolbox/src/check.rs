@@ -66,6 +66,60 @@ fn check_script(root: &Path) -> Value {
     })
 }
 
+/// 一句话超过这么多字符才做二次切分。
+const LINE_MAX_CHARS: usize = 20;
+/// 二次切分后每边至少这么多字符，否则算切得太碎。
+const MIN_PIECE_CHARS: usize = 6;
+
+fn is_sentence_end(c: char) -> bool {
+    // ASCII `.` 不算：小数、缩写、英文域名里到处是它。
+    matches!(c, '。' | '！' | '？' | '!' | '?' | '…')
+}
+
+/// 句中的次级断点；顿号 `、` 只分隔词组，不算。
+fn is_clause_break(c: char) -> bool {
+    matches!(c, '，' | '；' | '：' | '—' | ',' | ';' | ':')
+}
+
+/// 去掉行尾的引号/括号，避免 `。”` 这种尾巴影响“标点是否在行尾”的判断。
+fn trim_tail(text: &str) -> &str {
+    text.trim_end_matches(['"', '\'', '”', '’', '」', '』', '）', ')', '】', ']', '》', '〉'])
+}
+
+/// 两级分句校验：行内不许出现句末标点（该拆没拆）；超过
+/// [`LINE_MAX_CHARS`] 字符且存在能拆得两边都不少于 [`MIN_PIECE_CHARS`] 字符的
+/// 次级断点，就要二次切分。
+fn check_sentence_split(sentences: &[text::Sentence]) -> (Vec<Value>, Vec<Value>) {
+    let mut coarse: Vec<Value> = Vec::new();
+    let mut fine: Vec<Value> = Vec::new();
+    for item in sentences {
+        let text = trim_tail(item.text.trim());
+        let chars: Vec<char> = text.chars().collect();
+        if let Some(at) = chars
+            .iter()
+            .enumerate()
+            .take(chars.len().saturating_sub(1))
+            .find(|(_, c)| is_sentence_end(**c))
+            .map(|(at, _)| at)
+        {
+            coarse.push(json!({ "index": item.index, "at": at, "text": item.text }));
+            continue;
+        }
+        if chars.len() <= LINE_MAX_CHARS {
+            continue;
+        }
+        let splittable = (0..chars.len()).any(|at| {
+            is_clause_break(chars[at])
+                && at + 1 >= MIN_PIECE_CHARS
+                && chars.len() - at - 1 >= MIN_PIECE_CHARS
+        });
+        if splittable {
+            fine.push(json!({ "index": item.index, "chars": chars.len(), "text": item.text }));
+        }
+    }
+    (coarse, fine)
+}
+
 fn check_speech(root: &Path) -> Value {
     let article = root.join("article.md");
     let speech = root.join("speech.md");
@@ -141,6 +195,19 @@ fn check_speech(root: &Path) -> Value {
     let longest = sentences
         .iter()
         .max_by(|a, b| text::visual_len(&a.text).total_cmp(&text::visual_len(&b.text)));
+    let (coarse, fine) = check_sentence_split(&sentences);
+    if !coarse.is_empty() || !fine.is_empty() {
+        return json!({
+            "ok": false,
+            "mode": if translated { "translated" } else { "same-language" },
+            "error": "sentence split does not follow the two-level rule",
+            "split_at_sentence_end": coarse,
+            "split_at_clause_break": fine,
+            "rule": format!(
+                "split at 。！？ first; only sentences longer than {LINE_MAX_CHARS} chars get a second split at ，；：—, leaving at least {MIN_PIECE_CHARS} chars on both sides"
+            ),
+        });
+    }
     json!({
         "ok": true,
         "mode": if translated { "translated" } else { "same-language" },
@@ -150,6 +217,7 @@ fn check_speech(root: &Path) -> Value {
         "longest": longest.map(|item| json!({
             "index": item.index,
             "len": text::visual_len(&item.text),
+            "chars": item.text.chars().count(),
             "text": item.text,
         })),
         "hint": if translated { Some("translation accuracy is confirmed manually via review-speech") } else { None },

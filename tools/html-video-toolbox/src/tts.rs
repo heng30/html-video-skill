@@ -7,6 +7,8 @@ use voxcpm_rs::{GenerateOptions, Prompt, PromptAudio, VoxCPM};
 const SAMPLE_RATE: u32 = 48_000;
 const SENTENCE_GAP_MS: u64 = 150;
 const PARAGRAPH_GAP_MS: u64 = 400;
+/// 页间静默：至少要放得下 compose 叠的翻页音效（0.55s），再给切页留点余量。
+const PAGE_GAP_MS: u64 = 800;
 const TRIM_FILTER: &str = "silenceremove=start_periods=1:start_silence=0.05:start_threshold=-40dB,\
 areverse,silenceremove=start_periods=1:start_silence=0.12:start_threshold=-40dB,areverse";
 
@@ -267,7 +269,7 @@ fn trim(source: &Path, target: &Path) -> Result<()> {
     Ok(())
 }
 
-fn read_pcm16(path: &Path) -> Result<(Vec<i16>, u32)> {
+pub(crate) fn read_pcm16(path: &Path) -> Result<(Vec<i16>, u32)> {
     let mut reader =
         hound::WavReader::open(path).with_context(|| format!("cannot read {}", path.display()))?;
     let spec = reader.spec();
@@ -289,6 +291,27 @@ fn timestamp(ms: u64) -> String {
     let seconds = (ms % 60_000) / 1000;
     let millis = ms % 1000;
     format!("{hours:02}:{minutes:02}:{seconds:02},{millis:03}")
+}
+
+/// 每页第一句的编号（除首页），页间静默按它加长。
+fn page_start_indexes(root: &Path) -> Vec<usize> {
+    let path = root.join("slides/pages.json");
+    if !path.is_file() {
+        return Vec::new();
+    }
+    let Ok(data) = read_json(&path) else {
+        return Vec::new();
+    };
+    data["pages"]
+        .as_array()
+        .map(|pages| {
+            pages
+                .iter()
+                .skip(1)
+                .filter_map(|page| page["from"].as_u64().map(|from| from as usize))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 pub fn run(args: Args) -> Result<()> {
@@ -398,6 +421,7 @@ pub fn run(args: Args) -> Result<()> {
         .with_context(|| format!("cannot write {}", full_path.display()))?;
     let mut entries: Vec<Value> = Vec::new();
     let mut cursor: u64 = 0;
+    let page_starts = page_start_indexes(&root);
     let ms = |frames: u64| (frames as f64 * 1000.0 / SAMPLE_RATE as f64).round() as u64;
 
     for (pos, (src, line)) in source.iter().zip(&lines).enumerate() {
@@ -419,6 +443,8 @@ pub fn run(args: Args) -> Result<()> {
         let last = pos + 1 == source.len();
         let gap_ms = if last {
             0
+        } else if page_starts.contains(&source[pos + 1].index) {
+            PAGE_GAP_MS
         } else if source[pos + 1].paragraph != src.paragraph {
             PARAGRAPH_GAP_MS
         } else {
