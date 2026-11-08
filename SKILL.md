@@ -180,6 +180,16 @@ $HV check script <slug>
 
 `ok: true` 要求 `pages` 与 `slides` 数量一致、每页都有正文。
 
+**写完必须逐段重读一遍做通顺检查（不能省）**，`check script` 只查页数与空段，查不出语病：
+
+1. 断句与搭配：`收敛进最优`、`避免 A 和 B` 这种一半对一半错的搭配；动宾、主谓是否对得上。
+2. 主语与句式：被动句里插主动动词、缓兵句里换主语（`它连训练循环都不被允许写`）。
+3. 口头不顺的短语：`四猜四中`、`零数据地`、`被…来…` 这类写得出、念不出的。
+4. 标点逻辑：冒号后面该是解释而不是对比一前一后两个动作；逗号后面不能是悬空同位语。
+5. 指标引用是否指得清：`第 10 层第 2 号注意力头` 而不是 `十号第二头`。
+
+逐段列出问题 → 改 → 重跑 `$HV check script`。改完脚本要连带重做下游：`speech.md` 重新分句 → `pages` → `check speech` → `speech.tts.md` → `check tts-text`。
+
 `$HV state done <slug> script`
 
 ## 3 · review-script（人工断点）
@@ -288,7 +298,7 @@ $HV tts <slug> --gui --voice $SKILL/assets/cloned-voice.wav
 
 命令耗时以十分钟计，**丢后台跑**，不要前台阻塞。
 
-可选：`--model-dir <dir>`、`--gpu`（用 wgpu GPU 后端合成，不加则默认 CPU `flex` 后端）、`--force`（全量重合成）、`--only 1,3,5`（只处理这几句）、`--retry`（只重合成 `voice/asr-retry.json` 里的句子）、`--cfg` / `--steps` / `--max-len`（生成参数）。工具一次加载模型，逐句合成，裁剪每句首尾静默（句首 ≤50ms、句尾 ≤120ms，-40dB），按句间 150ms、段间 400ms 拼接，写出 `voice/full.wav`、`voice/timeline.json`、`voice/manifest.json`、`subs/final.srt`。
+可选：`--model-dir <dir>`、`--gpu`（用 wgpu GPU 后端合成，不加则默认 CPU `flex` 后端）、`--force`（全量重合成）、`--only 1,3,5`（只处理这几句）、`--retry`（只重合成 `voice/asr-retry.json` 里的句子）、`--cfg` / `--steps` / `--max-len`（生成参数）、`--rate-tolerance`（语速离群重做阈值，默认 0.25，0 关闭）。工具一次加载模型，逐句合成，裁剪每句首尾静默（句首 ≤50ms、句尾 ≤120ms，-40dB），合成后按每字时长中位数把语速偏离超过阈值的句子换噪声重做（最多 2 次，只留更接近中位的一次），按句间 150ms、段间 400ms 拼接，写出 `voice/full.wav`、`voice/timeline.json`、`voice/manifest.json`、`subs/final.srt`。
 
 - 音色缺失会直接报错停下，补好 `assets/cloned-voice.wav` 后重跑同一条命令（或设 `VOICE_CLONE_WAV`）。
 - 断点粒度是句子：`speech.tts.md` 某行不变就跳过该句；只改了几句就只重合成那几句。
@@ -371,6 +381,7 @@ $HV verify <slug>
 | 数字读法念错（如 `20` 变 `二零`、`105` 变 `一百五`） | `check tts-text` 查不出来；回 §6 做二次检查，按数量/编号分类重写那几行，再重跑 `check tts-text` |
 | `pages.json 不连续` | 重跑 `$HV pages <slug>`，别手改 from/to |
 | `script.md 页数与 slides 不一致` | 补页或删页，重跑 `$HV check script` |
+| 脚本念着别扭、有语病 | `check script` 查不出来；回 §2 的通顺检查逐段重读，改完连带重做 `speech.md` → `pages` → `speech.tts.md` |
 | `speech.md 段落数与 script.md 不一致` | 按页重新分句，重跑 `$HV pages` |
 | `ffmpeg 合成失败` | 看 stderr；多半是图片路径或 concat 列表 |
 | 合成太慢 | 正常：CPU 推理 4.3GB 模型；已合成的句子不会重跑 |

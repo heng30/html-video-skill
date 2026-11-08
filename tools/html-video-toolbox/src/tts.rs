@@ -10,6 +10,11 @@ const PARAGRAPH_GAP_MS: u64 = 400;
 const TRIM_FILTER: &str = "silenceremove=start_periods=1:start_silence=0.05:start_threshold=-40dB,\
 areverse,silenceremove=start_periods=1:start_silence=0.12:start_threshold=-40dB,areverse";
 
+/// 每句最多再合成几次（共 RATE_TRIES + 1 个 take）。
+const RATE_TRIES: usize = 2;
+/// 参与语速统计所需的最少汉字数，太短的句子语速天然偏高。
+const RATE_MIN_CJK: usize = 6;
+
 #[derive(clap::Args)]
 pub struct Args {
     /// article directory
@@ -38,6 +43,10 @@ pub struct Args {
     /// synthesize on the wgpu GPU backend instead of the CPU (flex) backend
     #[arg(long)]
     pub gpu: bool,
+    /// redo sentences whose speaking rate deviates more than this fraction from
+    /// the batch median (0 disables the check)
+    #[arg(long, default_value_t = 0.25)]
+    pub rate_tolerance: f64,
 }
 
 fn parse_only(only: Option<&str>) -> Result<Option<Vec<usize>>> {
@@ -74,37 +83,60 @@ fn review_passed(root: &Path) -> Result<bool> {
     Ok(data["steps"]["review-speech"]["status"].as_str() == Some("done"))
 }
 
+/// 已加载的克隆模型：一次加载，反复单句合成。
+struct Synth {
+    model: VoxCPM,
+    options: GenerateOptions,
+    sample_rate: u32,
+}
+
+impl Synth {
+    fn load(model_dir: &Path, voice: &Path, args: &Args, count: usize) -> Result<Self> {
+        eprintln!(
+            "loading model {} on {} ({count} sentences to synthesize)",
+            model_dir.display(),
+            if args.gpu { "wgpu/gpu" } else { "flex/cpu" },
+        );
+        let device = if args.gpu {
+            burn::tensor::Device::wgpu(burn::tensor::DeviceKind::DefaultDevice)
+        } else {
+            burn::tensor::Device::flex()
+        };
+        let model = VoxCPM::from_local(model_dir, &device)
+            .map_err(|e| anyhow!("model load failed: {e}"))?;
+        let sample_rate = model.sample_rate() as u32;
+        let options = GenerateOptions {
+            cfg_value: args.cfg,
+            inference_timesteps: args.steps,
+            max_len: args.max_len,
+            prompt: Prompt::Reference {
+                audio: PromptAudio::File(voice.to_path_buf()),
+            },
+            ..Default::default()
+        };
+        Ok(Self {
+            model,
+            options,
+            sample_rate,
+        })
+    }
+
+    fn one(&self, text: &str, index: usize, path: &Path) -> Result<()> {
+        let samples = self
+            .model
+            .generate(text, self.options.clone())
+            .map_err(|e| anyhow!("sentence {index} synthesis failed: {e}"))?;
+        voxcpm_rs::audio::write_wav(path, &samples, self.sample_rate)
+            .map_err(|e| anyhow!("write failed {}: {e}", path.display()))
+    }
+}
+
 fn synthesize(
-    model_dir: &Path,
-    voice: &Path,
-    args: &Args,
+    synth: &Synth,
     raw_dir: &Path,
     lines: &[text::Sentence],
     wanted: &[usize],
 ) -> Result<()> {
-    eprintln!(
-        "loading model {} on {} ({} sentences to synthesize)",
-        model_dir.display(),
-        if args.gpu { "wgpu/gpu" } else { "flex/cpu" },
-        wanted.len()
-    );
-    let device = if args.gpu {
-        burn::tensor::Device::wgpu(burn::tensor::DeviceKind::DefaultDevice)
-    } else {
-        burn::tensor::Device::flex()
-    };
-    let model =
-        VoxCPM::from_local(model_dir, &device).map_err(|e| anyhow!("model load failed: {e}"))?;
-    let sample_rate = model.sample_rate() as u32;
-    let options = GenerateOptions {
-        cfg_value: args.cfg,
-        inference_timesteps: args.steps,
-        max_len: args.max_len,
-        prompt: Prompt::Reference {
-            audio: PromptAudio::File(voice.to_path_buf()),
-        },
-        ..Default::default()
-    };
     for (done, index) in wanted.iter().enumerate() {
         let sentence = &lines[index - 1].text;
         eprintln!(
@@ -112,14 +144,104 @@ fn synthesize(
             done + 1,
             wanted.len()
         );
-        let samples = model
-            .generate(sentence, options.clone())
-            .map_err(|e| anyhow!("sentence {index} synthesis failed: {e}"))?;
-        let path = raw_dir.join(format!("sent-{index:04}.wav"));
-        voxcpm_rs::audio::write_wav(&path, &samples, sample_rate)
-            .map_err(|e| anyhow!("write failed {}: {e}", path.display()))?;
+        synth.one(
+            sentence,
+            *index,
+            &raw_dir.join(format!("sent-{index:04}.wav")),
+        )?;
     }
     Ok(())
+}
+
+fn cjk_chars(text: &str) -> usize {
+    text.chars()
+        .filter(|c| ('\u{4e00}'..='\u{9fff}').contains(c))
+        .count()
+}
+
+/// 每字时长（毫秒）；汉字太少或读不出来返回 `None`，不参与语速统计。
+fn rate_ms(path: &Path, text: &str) -> Option<f64> {
+    let cjk = cjk_chars(text);
+    if cjk < RATE_MIN_CJK {
+        return None;
+    }
+    let (samples, rate) = read_pcm16(path).ok()?;
+    Some(samples.len() as f64 * 1000.0 / rate as f64 / cjk as f64)
+}
+
+/// 采样噪声会给每句带来 ±20% 的语速浮动，慢的那一端听着就是拖腔加音色漂移。
+/// 用本次合成句子的语速中位数当基准，把偏离超过 `tolerance` 的句子换噪声
+/// 重做，只保留离中位数最近的一次（原文件一直在盘上，更差的一次直接丢掉）。
+/// 返回真正重做过的句子编号。
+fn redo_rate_outliers(
+    synth: &Synth,
+    root: &Path,
+    lines: &[text::Sentence],
+    done: &[usize],
+    tolerance: f64,
+) -> Result<Vec<usize>> {
+    if tolerance <= 0.0 {
+        return Ok(Vec::new());
+    }
+    let voice_dir = root.join("voice");
+    let raw_dir = voice_dir.join("raw");
+    let mut rates: Vec<(usize, f64)> = Vec::new();
+    for line in lines {
+        let path = voice_dir.join(format!("sent-{:04}.wav", line.index));
+        if let Some(ms) = rate_ms(&path, &line.text) {
+            rates.push((line.index, ms));
+        }
+    }
+    if rates.len() < 3 {
+        return Ok(Vec::new());
+    }
+    let mut sorted: Vec<f64> = rates.iter().map(|r| r.1).collect();
+    sorted.sort_by(f64::total_cmp);
+    let median = sorted[sorted.len() / 2];
+
+    let mut retried: Vec<usize> = Vec::new();
+    for (index, ms) in rates {
+        if !done.contains(&index) {
+            continue;
+        }
+        let mut best = (ms / median - 1.0).abs();
+        if best <= tolerance {
+            continue;
+        }
+        let text = &lines[index - 1].text;
+        eprintln!("[rate] sentence {index}: {ms:.0}ms/char vs median {median:.0}ms/char, redoing");
+        let raw_best = raw_dir.join(format!("sent-{index:04}.wav"));
+        let trim_best = voice_dir.join(format!("sent-{index:04}.wav"));
+        let raw_tmp = raw_dir.join(format!(".sent-{index:04}.retry.wav"));
+        let trim_tmp = voice_dir.join(format!(".sent-{index:04}.retry.wav"));
+        for attempt in 1..=RATE_TRIES {
+            synth.one(text, index, &raw_tmp)?;
+            trim(&raw_tmp, &trim_tmp)?;
+            let fresh = rate_ms(&trim_tmp, text).unwrap_or(ms);
+            let score = (fresh / median - 1.0).abs();
+            if score < best {
+                best = score;
+                std::fs::rename(&raw_tmp, &raw_best)?;
+                std::fs::rename(&trim_tmp, &trim_best)?;
+                eprintln!("    take {attempt}: {fresh:.0}ms/char, closer to median, kept");
+            } else {
+                eprintln!("    take {attempt}: {fresh:.0}ms/char, still off, dropped");
+            }
+            let _ = std::fs::remove_file(&raw_tmp);
+            let _ = std::fs::remove_file(&trim_tmp);
+            if best <= tolerance {
+                break;
+            }
+        }
+        if best > tolerance {
+            eprintln!(
+                "    sentence {index} still {:.0}% off the median, kept the closest take",
+                best * 100.0
+            );
+        }
+        retried.push(index);
+    }
+    Ok(retried)
 }
 
 fn trim(source: &Path, target: &Path) -> Result<()> {
@@ -251,15 +373,18 @@ pub fn run(args: Args) -> Result<()> {
         }
     }
 
+    let mut redo: Vec<usize> = Vec::new();
     if !synth.is_empty() {
-        synthesize(&model_dir, &args.voice, &args, &raw_dir, &lines, &synth)?;
-    }
-    for index in &trim_needs {
-        let raw = raw_dir.join(format!("sent-{index:04}.wav"));
-        if !raw.exists() {
-            bail!("missing synthesis output: {}", raw.display());
+        let model = Synth::load(&model_dir, &args.voice, &args, synth.len())?;
+        synthesize(&model, &raw_dir, &lines, &synth)?;
+        for index in &trim_needs {
+            let raw = raw_dir.join(format!("sent-{index:04}.wav"));
+            if !raw.exists() {
+                bail!("missing synthesis output: {}", raw.display());
+            }
+            trim(&raw, &voice_dir.join(format!("sent-{index:04}.wav")))?;
         }
-        trim(&raw, &voice_dir.join(format!("sent-{index:04}.wav")))?;
+        redo = redo_rate_outliers(&model, &root, &lines, &synth, args.rate_tolerance)?;
     }
 
     let full_path = voice_dir.join("full.wav");
@@ -356,6 +481,7 @@ pub fn run(args: Args) -> Result<()> {
         "sentences": entries.len(),
         "synthesized": synth,
         "trimmed": trim_needs,
+        "rate_retried": redo,
         "full": full_path.display().to_string(),
         "duration_ms": total_ms,
         "srt": srt_path.display().to_string(),
