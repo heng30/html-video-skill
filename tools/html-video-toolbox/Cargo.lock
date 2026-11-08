@@ -4023,6 +4023,7 @@ dependencies = [
  "burn",
  "chromiumoxide",
  "clap",
+ "env_logger",
  "fun-ast-nano",
  "futures",
  "hound",

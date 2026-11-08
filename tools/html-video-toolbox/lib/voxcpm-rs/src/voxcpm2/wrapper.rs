@@ -156,6 +156,9 @@ pub struct GenerateOptions {
     pub min_len: usize,
     /// Hard upper bound on the number of latent patches per call. Each patch
     /// is `patch_size * chunk_size / sample_rate` seconds of audio (~80 ms).
+    /// [`VoxCPM::generate`] additionally caps it at
+    /// `text_tokens * 6 + 10` patches (upstream badcase guard), so the
+    /// effective bound is whichever is smaller.
     pub max_len: usize,
     /// Prompt-conditioning mode. See [`Prompt`].
     pub prompt: Prompt,
@@ -438,27 +441,47 @@ impl VoxCPM {
             }
         }
 
-        let inputs = self.build_inference_inputs(text, &opts.prompt)?;
-
         // Wrap the cancel token (if any) into a `dyn Fn() -> bool` so the
         // model layer doesn't need to know about `CancelToken` directly.
         let cancel_fn: Option<Box<dyn Fn() -> bool>> = opts.cancel.as_ref().map(|c| {
             let c = c.clone();
             Box::new(move || c.is_cancelled()) as Box<dyn Fn() -> bool>
         });
-        let (latent, _stop_steps) = self.model.inference(
-            inputs.text_token,
-            inputs.text_mask,
-            inputs.feat,
-            inputs.feat_mask,
-            opts.min_len,
-            opts.max_len,
-            opts.inference_timesteps,
-            opts.cfg_value as f64,
-            cancel_fn.as_deref(),
-        )?;
+        let text_len = self.text_len(text)?;
+        let max_len = badcase_max_len(&opts, text_len);
 
-        Ok(decode_latent_to_samples(&self.model.audio_vae, latent)?)
+        // The stop head occasionally never fires: the AR loop then keeps
+        // emitting patches (~160 ms each) that drift in timbre and speech
+        // rate. Upstream detects that runaway by patch/text ratio and retries
+        // with fresh diffusion noise; mirror it here.
+        for attempt in 1..=BADCASE_TRIES {
+            let inputs = self.build_inference_inputs(text, &opts.prompt)?;
+            let (latent, stops) = self.model.inference(
+                inputs.text_token,
+                inputs.text_mask,
+                inputs.feat,
+                inputs.feat_mask,
+                opts.min_len,
+                max_len,
+                opts.inference_timesteps,
+                opts.cfg_value as f64,
+                cancel_fn.as_deref(),
+            )?;
+            let patches = stops.first().copied().unwrap_or(0);
+            if attempt == BADCASE_TRIES || patches < text_len * BADCASE_RATIO {
+                return Ok(decode_latent_to_samples(&self.model.audio_vae, latent)?);
+            }
+            log::warn!(
+                "badcase: {patches} latent patches for {text_len} text tokens, retrying ({attempt}/{BADCASE_TRIES})"
+            );
+        }
+        unreachable!()
+    }
+
+    /// Number of text tokens in `text` (1 when `text` tokenizes to nothing), as
+    /// used by the badcase ratio in [`badcase_max_len`].
+    fn text_len(&self, text: &str) -> crate::Result<usize> {
+        Ok(self.tokenizer.encode(text)?.len().max(1))
     }
 
     /// Streaming variant of [`Self::generate`]: returns an iterator that
@@ -506,13 +529,14 @@ impl VoxCPM {
         text: &str,
         opts: GenerateOptions,
     ) -> crate::Result<GenerateStream<'_>> {
+        let max_len = badcase_max_len(&opts, self.text_len(text)?);
         let inputs = self.build_inference_inputs(text, &opts.prompt)?;
         let state = self.model.prefill(
             inputs.text_token,
             inputs.text_mask,
             inputs.feat,
             inputs.feat_mask,
-            opts.max_len,
+            max_len,
         );
         Ok(GenerateStream {
             model: &self.model,
@@ -521,7 +545,7 @@ impl VoxCPM {
             samples_emitted: 0,
             step: 0,
             min_len: opts.min_len,
-            max_len: opts.max_len,
+            max_len,
             inference_timesteps: opts.inference_timesteps,
             cfg_value: opts.cfg_value as f64,
             chunk_patches: opts.chunk_patches.max(1),
@@ -947,12 +971,20 @@ impl VoxCPM {
         // Process remaining segments in batched groups of `parallel_n`.
         for group in remaining.chunks(parallel_n) {
             let texts_ref: Vec<&str> = group.iter().map(|s| s.as_str()).collect();
+            let text_len = group
+                .iter()
+                .map(|s| self.text_len(s))
+                .collect::<crate::Result<Vec<_>>>()?
+                .into_iter()
+                .max()
+                .unwrap_or(1);
+            let max_len = badcase_max_len(opts, text_len);
             let (tt, tm, ft, fm, lens) =
                 self.build_batched_inputs(&texts_ref, Some(&ref_feat))?;
             let (latent, stops) = self.model.inference_with_lengths(
                 tt, tm, ft, fm,
                 opts.min_len,
-                opts.max_len,
+                max_len,
                 opts.inference_timesteps,
                 opts.cfg_value as f64,
                 cancel_fn.as_deref(),
@@ -1087,6 +1119,30 @@ pub fn split_sentences(text: &str) -> Vec<String> {
         out.push(trimmed.to_string());
     }
     out
+}
+
+/// Acceptable audio-to-text ratio before a generation counts as a runaway.
+const BADCASE_RATIO: usize = 6;
+/// Total generation attempts when a runaway is detected (upstream default).
+const BADCASE_TRIES: usize = 3;
+
+/// Cap [`GenerateOptions::max_len`] at `text_len * BADCASE_RATIO + 10` patches,
+/// exactly like the Python reference, so a stop head that never fires cannot
+/// stretch a short sentence into minutes of drifting audio.
+fn badcase_max_len(opts: &GenerateOptions, text_len: usize) -> usize {
+    opts.max_len.min(text_len * BADCASE_RATIO + 10)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn badcase_cap_follows_text_len() {
+        let opts = GenerateOptions::default();
+        assert_eq!(badcase_max_len(&opts, 20), 20 * 6 + 10);
+        assert_eq!(badcase_max_len(&opts, 1000), opts.max_len);
+    }
 }
 
 /// Output of [`VoxCPM::build_inference_inputs`].
