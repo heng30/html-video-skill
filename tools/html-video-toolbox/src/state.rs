@@ -32,8 +32,8 @@ fn required(step: &str) -> &'static [&'static str] {
         "fetch" => &["url", "article.md", "title.md"],
         "slides" => &["slides", "covers"],
         "script" => &["script.md"],
-        "speech" => &["speech.md", "slides/pages.json"],
-        "tts-text" => &["speech.tts.md"],
+        "speech" => &["speech.txt", "slides/pages.json"],
+        "tts-text" => &["speech.tts.txt"],
         "tts" => &["voice/full.wav", "subs/final.srt"],
         "compose" => &["final.mp4", "final.srt"],
         _ => &[],
@@ -46,9 +46,9 @@ fn hint(step: &str) -> Option<&'static str> {
         "slides" => "build index.html + cover.html, run screenshot for slides and --covers",
         "script" => "write script.md page by page against slides, then run check script",
         "review-script" => "after manually reviewing script.md, run state done <dir> review-script",
-        "speech" => "split script.md into sentences as speech.md, then run pages and check speech",
-        "review-speech" => "after manually reviewing speech.md, run state done <dir> review-speech",
-        "tts-text" => "generate speech.tts.md (digits to Chinese), then run check tts-text",
+        "speech" => "split script.md into sentences as speech.txt, then run pages and check speech",
+        "review-speech" => "after manually reviewing speech.txt, run state done <dir> review-speech",
+        "tts-text" => "generate speech.tts.txt (digits to Chinese), then run check tts-text",
         "tts" => "run tts to synthesize audio and subtitles",
         "compose" => "run compose to build the video",
         "verify" => "run verify for acceptance",
@@ -96,7 +96,7 @@ pub fn status(root: &Path) -> Result<Value> {
             Some("waiting for manual review of script.md (one paragraph per page); after confirmation run state done <dir> review-script")
         }
         Some("review-speech") => {
-            Some("waiting for manual review of speech.md (sentences); after confirmation run state done <dir> review-speech")
+            Some("waiting for manual review of speech.txt (sentences); after confirmation run state done <dir> review-speech")
         }
         _ => None,
     };

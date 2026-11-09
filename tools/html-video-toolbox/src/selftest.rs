@@ -31,13 +31,16 @@ pub fn run() -> Result<()> {
     write(&root, "title.md", "Title\n")?;
     write(&root, "slides/slide-01.png", "")?;
     write(&root, "slides/slide-02.png", "")?;
+    write(&root, "covers/cover-16x9.png", "")?;
+    write(&root, "covers/cover-4x3.png", "")?;
+    write(&root, "covers/cover-3x4.png", "")?;
     write(
         &root,
         "script.md",
         "## 01 Test page one\nFirst sentence.\n\n## 02 Test page two\nSecond sentence.\n",
     )?;
-    write(&root, "speech.md", "First sentence.\n\nSecond sentence.\n")?;
-    write(&root, "speech.tts.md", "First sentence.\n\nSecond sentence.\n")?;
+    write(&root, "speech.txt", "First sentence.\n\nSecond sentence.\n")?;
+    write(&root, "speech.tts.txt", "First sentence.\n\nSecond sentence.\n")?;
 
     expect("speech ok", &crate::check::evaluate("speech", &root), true)?;
     checks += 1;
@@ -61,34 +64,34 @@ pub fn run() -> Result<()> {
     checks += 1;
 
     // 改字后必须拼不回原文
-    write(&root, "speech.md", "First sentence.\n\nSecond sentence edited.\n")?;
+    write(&root, "speech.txt", "First sentence.\n\nSecond sentence edited.\n")?;
     expect(
         "speech edited",
         &crate::check::evaluate("speech", &root),
         false,
     )?;
     checks += 1;
-    write(&root, "speech.md", "First sentence.\n\nSecond sentence.\n")?;
+    write(&root, "speech.txt", "First sentence.\n\nSecond sentence.\n")?;
 
     // 配音稿残留阿拉伯数字
-    write(&root, "speech.tts.md", "First sentence.\n\nSecond sentence in 2024.\n")?;
+    write(&root, "speech.tts.txt", "First sentence.\n\nSecond sentence in 2024.\n")?;
     let digits = crate::check::evaluate("tts-text", &root);
     expect("tts-text digits", &digits, false)?;
     if digits["digits_left"].as_array().map(Vec::len) != Some(1) {
         bail!("selftest failed [digits_left] expected 1 item: {digits}");
     }
     checks += 1;
-    write(&root, "speech.tts.md", "First sentence.\n\nSecond sentence.\n")?;
+    write(&root, "speech.tts.txt", "First sentence.\n\nSecond sentence.\n")?;
 
     // 段落数与页数不一致
-    write(&root, "speech.md", "First sentence.\nSecond sentence.\n")?;
+    write(&root, "speech.txt", "First sentence.\nSecond sentence.\n")?;
     expect(
         "speech paragraphs",
         &crate::check::evaluate("speech", &root),
         false,
     )?;
     checks += 1;
-    write(&root, "speech.md", "First sentence.\n\nSecond sentence.\n")?;
+    write(&root, "speech.txt", "First sentence.\n\nSecond sentence.\n")?;
 
     // 分句校验：script 页数与 slides 一致
     expect("script ok", &crate::check::evaluate("script", &root), true)?;

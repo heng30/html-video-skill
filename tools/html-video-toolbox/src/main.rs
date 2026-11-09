@@ -33,11 +33,11 @@ enum Command {
     },
     /// document checks: script / speech / tts-text
     Check(check::Args),
-    /// script.md + speech.md → slides/pages.json
+    /// script.md + speech.txt → slides/pages.json
     Pages(pages::Args),
     /// per-sentence TTS + silence trim + audio concat + SRT
     Tts(tts::Args),
-    /// transcribe voice/*.wav and compare with speech.tts.md
+    /// transcribe voice/*.wav and compare with speech.tts.txt
     Asr(asr::Args),
     /// slides + audio -> final.mp4 without subtitles
     Compose(compose::Args),

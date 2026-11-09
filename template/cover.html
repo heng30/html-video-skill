@@ -6,7 +6,8 @@
 <style>
 /* 三张封面：16:9 / 4:3 / 3:4。画布宽度统一 960，只改高度，
    字号与正片一致；截图工具按短边 1080 出图，得到 1920×1080 / 1440×1080 / 1080×1440。
-   文字居中：内容块垂直居中、水平居中。改文案只改三个 <section> 里的字。 */
+   文字居中：内容块垂直居中、水平居中。改文案只改三个 <section> 里的字。
+   16:9 横版的中间文本块占画幅宽度的 72%（2/3–3/4 区间），h1 放大到 68px；每行写 9–10 字正好铺满这个宽度，超了会折成三行。 */
 
 @font-face {
   font-family: "Noto Sans CJK SC";
@@ -54,7 +55,7 @@ body {
   text-align: center;
   overflow: hidden;
 }
-.slide.wide { height: 540px; }
+.slide.wide { height: 540px; padding-left: 0; padding-right: 0; }
 .slide.classic { height: 720px; }
 .slide.portrait { height: 1280px; }
 
@@ -94,6 +95,14 @@ h1 {
   letter-spacing: 0.08em;
   color: var(--muted);
 }
+
+/* 16:9 横版：中间文本块占画幅宽度的 2/3–3/4，字号相应放大，别让标题缩在正中一小条 */
+.slide.wide h1,
+.slide.wide .dek { width: 72%; max-width: none; }
+.slide.wide h1 { font-size: 68px; }
+.slide.wide .dek { font-size: 23px; }
+.slide.wide .kicker { font-size: 14px; }
+.slide.wide .meta { font-size: 13px; }
 </style>
 </head>
 <body>

@@ -327,11 +327,11 @@ pub fn run(args: Args) -> Result<()> {
         .map_err(|_| anyhow!("directory not found: {}", args.dir.display()))?;
     if !review_passed(&root)? {
         bail!(
-            "review-speech not done: check speech.md manually first, then run state done <dir> review-speech"
+            "review-speech not done: check speech.txt manually first, then run state done <dir> review-speech"
         );
     }
-    let speech_path = root.join("speech.md");
-    let tts_path = root.join("speech.tts.md");
+    let speech_path = root.join("speech.txt");
+    let tts_path = root.join("speech.tts.txt");
     for path in [&speech_path, &tts_path] {
         if !path.is_file() {
             bail!("missing file: {}", path.display());
@@ -341,7 +341,7 @@ pub fn run(args: Args) -> Result<()> {
     let lines = text::read_sentences(&tts_path)?;
     if source.len() != lines.len() {
         bail!(
-            "speech.md and speech.tts.md line counts differ ({} vs {})",
+            "speech.txt and speech.tts.txt line counts differ ({} vs {})",
             source.len(),
             lines.len()
         );

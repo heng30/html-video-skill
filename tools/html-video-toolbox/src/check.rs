@@ -122,7 +122,7 @@ fn check_sentence_split(sentences: &[text::Sentence]) -> (Vec<Value>, Vec<Value>
 
 fn check_speech(root: &Path) -> Value {
     let article = root.join("article.md");
-    let speech = root.join("speech.md");
+    let speech = root.join("speech.txt");
     for path in [&article, &speech] {
         if !path.is_file() {
             return json!({ "ok": false, "error": format!("missing file: {}", path.display()) });
@@ -152,7 +152,7 @@ fn check_speech(root: &Path) -> Value {
             return json!({
                 "ok": false,
                 "mode": "translated",
-                "error": "speech.md contains sentences that are not Chinese",
+                "error": "speech.txt contains sentences that are not Chinese",
                 "lines": missing,
             });
         }
@@ -187,7 +187,7 @@ fn check_speech(root: &Path) -> Value {
         return json!({
             "ok": false,
             "mode": if translated { "translated" } else { "same-language" },
-            "error": "speech.md paragraph count does not match script.md pages",
+            "error": "speech.txt paragraph count does not match script.md pages",
             "script_pages": script_pages,
             "speech_paragraphs": paragraphs,
         });
@@ -221,13 +221,13 @@ fn check_speech(root: &Path) -> Value {
             "text": item.text,
         })),
         "hint": if translated { Some("translation accuracy is confirmed manually via review-speech") } else { None },
-        "next": "stop here: hand speech.md to the user for review; after confirmation run state done <dir> review-speech",
+        "next": "stop here: hand speech.txt to the user for review; after confirmation run state done <dir> review-speech",
     })
 }
 
 fn check_tts_text(root: &Path) -> Value {
-    let speech = root.join("speech.md");
-    let tts = root.join("speech.tts.md");
+    let speech = root.join("speech.txt");
+    let tts = root.join("speech.tts.txt");
     for path in [&speech, &tts] {
         if !path.is_file() {
             return json!({ "ok": false, "error": format!("missing file: {}", path.display()) });

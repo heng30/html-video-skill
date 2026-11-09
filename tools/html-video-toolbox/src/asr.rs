@@ -281,19 +281,19 @@ pub fn run(args: Args) -> Result<()> {
         .dir
         .canonicalize()
         .map_err(|_| anyhow!("directory not found: {}", args.dir.display()))?;
-    let tts_path = root.join("speech.tts.md");
+    let tts_path = root.join("speech.tts.txt");
     if !tts_path.is_file() {
         bail!("missing file: {}", tts_path.display());
     }
     let lines = text::read_sentences(&tts_path)?;
     if lines.is_empty() {
-        bail!("speech.tts.md has no sentence");
+        bail!("speech.tts.txt has no sentence");
     }
     let only = crate::tts::parse_only(args.only.as_deref())?;
     if let Some(set) = &only {
         for index in set {
             if !lines.iter().any(|line| line.index == *index) {
-                bail!("no sentence {index} in speech.tts.md");
+                bail!("no sentence {index} in speech.tts.txt");
             }
         }
     }

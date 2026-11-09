@@ -35,7 +35,7 @@ fn paragraph_counts(path: &Path) -> Result<Vec<usize>> {
 
 pub fn build(root: &Path) -> Result<Value> {
     let script = root.join("script.md");
-    let speech = root.join("speech.md");
+    let speech = root.join("speech.txt");
     for path in [&script, &speech] {
         if !path.is_file() {
             bail!("missing file: {}", path.display());
@@ -60,7 +60,7 @@ pub fn build(root: &Path) -> Result<Value> {
     }
     if paragraphs.len() != titles.len() {
         bail!(
-            "speech.md paragraph count does not match script.md pages ({} vs {})",
+            "speech.txt paragraph count does not match script.md pages ({} vs {})",
             paragraphs.len(),
             titles.len()
         );

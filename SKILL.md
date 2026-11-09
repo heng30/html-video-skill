@@ -12,9 +12,9 @@ disable-model-invocation: true
 
 **耗时预期**：VoxCPM2 在本机 CPU 上加载约 1.5–2 分钟，每句合成约 1–2 分钟。10 分钟成片按 1–2 小时估。先合成 1–2 句试听，再跑全量。回听校验（`asr`）另算：模型加载约 20 秒，每句再多几秒。
 
-**人工审核点铁律**：每个审核点（`review-script`、`review-speech`）用户说"看过了/没问题"之后，**第一步必须用 `read` 重新完整读取被审文件**（`script.md` / `speech.md`），以磁盘上的内容为准；不许用上下文里的旧副本，不许只凭"用户说没问题"就直接往下走。用户很可能直接改了文件——不重读 = 审核白做，下游全按旧内容生产。
+**人工审核点铁律**：每个审核点（`review-script`、`review-speech`）用户说"看过了/没问题"之后，**第一步必须用 `read` 重新完整读取被审文件**（`script.md` / `speech.txt`），以磁盘上的内容为准；不许用上下文里的旧副本，不许只凭"用户说没问题"就直接往下走。用户很可能直接改了文件——不重读 = 审核白做，下游全按旧内容生产。
 
-**审核产物只读铁律**：用户审核过的文件（`script.md`、`speech.md`）在审核点之后**一个字都不许改**——包括为了让 `$HV check` 变绿而重新断行、补标点、改标点、调语序。**审核完也无需再校验**：`check script` / `check speech` 只在 agent 写完时跑一次，人工改过的断句以人的判断为准，重跑只会报出无意义的告警。要改只能改用户没审的下游文件（`speech.tts.md`、`index.html`、`cover.html`）。
+**审核产物只读铁律**：用户审核过的文件（`script.md`、`speech.txt`）在审核点之后**一个字都不许改**——包括为了让 `$HV check` 变绿而重新断行、补标点、改标点、调语序。**审核完也无需再校验**：`check script` / `check speech` 只在 agent 写完时跑一次，人工改过的断句以人的判断为准，重跑只会报出无意义的告警。要改只能改用户没审的下游文件（`speech.tts.txt`、`index.html`、`cover.html`）。
 
 **`tts` / `asr` 一律丢后台跑**（`background_bash`），别占着前台等；启动后用 `read_process_output` 轮询进度，等日志出现完成标志或进程退出再看结果。
 
@@ -22,12 +22,12 @@ disable-model-invocation: true
 |---|---|---|
 | `fetch` | `url`、`article.md`、`title.md`、`images/` | agent |
 | `slides` | `index.html`、`slides/slide-01.png …` | agent + `screenshot` |
-| `covers`（可选） | `covers/cover-16x9.png`、`cover-4x3.png`、`cover-3x4.png` | agent + `screenshot --covers` |
+| `covers` | `covers/cover-16x9.png`、`cover-4x3.png`、`cover-3x4.png` | agent + `screenshot --covers` |
 | `script` | `script.md` | agent（每页一段演讲稿） |
 | `review-script` | 无（人工断点） | 人 |
-| `speech` | `speech.md`、`slides/pages.json` | agent（分句）+ `pages` |
+| `speech` | `speech.txt`、`slides/pages.json` | agent（分句）+ `pages` |
 | `review-speech` | 无（人工断点） | 人 |
-| `tts-text` | `speech.tts.md` | agent（LLM 转口语稿 + 数字读法二次检查） |
+| `tts-text` | `speech.tts.txt` | agent（LLM 转口语稿 + 数字读法二次检查） |
 | `tts` | `voice/`、`subs/final.srt`、`voice/asr.json` | `tts` + `asr`（逐句回听校验） |
 | `compose` | `final.mp4`、`final.srt` | `compose`（ffmpeg） |
 | `verify` | 无（验收报告） | `verify` |
@@ -44,10 +44,10 @@ disable-model-invocation: true
 ├── index.html             # 960×540 幻灯片（组件搭积木）
 ├── slides/                # slide-01.png … 1920×1080
 │   └── pages.json         # 句子 → 页 映射
-├── cover.html             # 三张平台封面（可选，从 template/cover.html 复制）
-├── covers/                # cover-16x9.png / cover-4x3.png / cover-3x4.png（可选）
-├── speech.md              # 分句后的中文口播稿，每页一段，阿拉伯数字
-├── speech.tts.md          # 配音稿，数字转中文读法，行与 speech.md 一一对应（agent 自己二次检查读法，不入人工审）
+├── cover.html             # 三张平台封面（从 template/cover.html 复制）
+├── covers/                # cover-16x9.png / cover-4x3.png / cover-3x4.png（`slides` 步的必备产物）
+├── speech.txt              # 分句后的中文口播稿（纯文本），每页一段，阿拉伯数字
+├── speech.tts.txt          # 配音稿（纯文本），数字转中文读法，行与 speech.txt 一一对应（agent 自己二次检查读法，不入人工审）
 ├── voice/
 │   ├── raw/               # 模型原始输出 sent-0001.wav
 │   ├── sent-0001.wav      # 裁剪静默后
@@ -159,7 +159,7 @@ $HV screenshot <slug>/index.html -o <slug>/slides
 
 这一步**不写** `pages.json`，它要等分句完成（文件名零填充由 `pages` / `compose` 统一处理）。
 
-**可选·平台封面**：需要横版/竖版发布封面时，用 `$SKILL/template/cover.html` 同一套视觉出三张：
+**平台封面（必须做）**：用 `$SKILL/template/cover.html` 同一套视觉出三张。`covers/` 是 `slides` 步的必备产物，缺了 `$HV state done <slug> slides` 会一直不生效：
 
 ```bash
 cp $SKILL/template/cover.html <slug>/cover.html
@@ -169,7 +169,7 @@ $HV screenshot <slug>/cover.html --covers -o <slug>/covers
 - 产物 `covers/cover-16x9.png`（1920×1080）、`covers/cover-4x3.png`（1440×1080）、`covers/cover-3x4.png`（1080×1440），按短边 1080 出图。三个 `<section class="slide">` 的宽高比必须是 16:9 / 4:3 / 3:4，改尺寸或删页都直接报错。
 - 只改三个 `<section>` 里的文案，不动 `cover.html` 的布局样式。
 - **居中硬规则**：kicker、标题、导语、分隔线、署名这整块内容，在画面里必须**水平居中且垂直居中**。不许偏左、不许压底、不许改成左对齐或上下分栏。截完逐张 `read` 看图，确认居中、无溢出、`<span class="hl">` 颜色正常；不合格就改文案或换更短的标题重截。
-- covers 不是断点步骤，不单独 `state done`。
+- 封面是三张，缺一张都不算完成；不是断点步骤，不单独 `state done`，但必须先出完三张才能 `state done <slug> slides`。
 
 `$HV state done <slug> slides`
 
@@ -207,7 +207,7 @@ $HV check script <slug>
 4. 标点逻辑：冒号后面该是解释而不是对比一前一后两个动作；逗号后面不能是悬空同位语。
 5. 指标引用是否指得清：`第 10 层第 2 号注意力头` 而不是 `十号第二头`。
 
-逐段列出问题 → 改 → 重跑 `$HV check script`。改完脚本要连带重做下游：`speech.md` 重新分句 → `pages` → `check speech` → `speech.tts.md` → `check tts-text`。
+逐段列出问题 → 改 → 重跑 `$HV check script`。改完脚本要连带重做下游：`speech.txt` 重新分句 → `pages` → `check speech` → `speech.tts.txt` → `check tts-text`。
 
 `$HV state done <slug> script`
 
@@ -219,7 +219,7 @@ $HV check script <slug>
 - 有没有漏页、重复、跨页
 - 事实、数字、语气是否要改
 
-**用户确认后，第一步：用 `read` 重新读取整个 `script.md`**（不要用上下文里的旧版本，也不要只看用户贴的片段）。读到的内容与上下文不一致时，以文件为准，**不要重跑 `$HV check script`**（审核后不再校验被审文件），直接同步下游（`speech.md` → `pages` → `speech.tts.md` → `check tts-text`）。
+**用户确认后，第一步：用 `read` 重新读取整个 `script.md`**（不要用上下文里的旧版本，也不要只看用户贴的片段）。读到的内容与上下文不一致时，以文件为准，**不要重跑 `$HV check script`**（审核后不再校验被审文件），直接同步下游（`speech.txt` → `pages` → `speech.tts.txt` → `check tts-text`）。
 
 确认与磁盘内容一致后，再：
 
@@ -229,7 +229,7 @@ $HV state done <slug> review-script
 
 ## 4 · speech
 
-把 `script.md` 逐页分句，写 `speech.md`：
+把 `script.md` 逐页分句，写 `speech.txt`：
 
 - 每页一段，段间空行；段落数必须等于 `script.md` 的页数
 - 一行一句，**分两级切**：
@@ -246,7 +246,7 @@ $HV state done <slug> review-script
 $HV pages <slug>
 ```
 
-工具按 `script.md` 的页标题和 `speech.md` 的段落边界生成 `slides/pages.json`，并校验 script 页数、speech 段落数、slides 图片数三者一致。
+工具按 `script.md` 的页标题和 `speech.txt` 的段落边界生成 `slides/pages.json`，并校验 script 页数、speech 段落数、slides 图片数三者一致。
 
 校验：
 
@@ -262,13 +262,13 @@ $HV check speech <slug>
 
 ## 5 · review-speech（人工断点）
 
-**停在这里，不要继续配音。** 把 `speech.md` 交给用户审查：
+**停在这里，不要继续配音。** 把 `speech.txt` 交给用户审查：
 
 - 分句是否自然、有没有断在奇怪的位置
 - 译文是否准确、有没有漏译或错译
 - 数字是否保留阿拉伯数字、`pages.json` 的页边界是否合理
 
-**用户确认后，第一步：用 `read` 重新读取整个 `speech.md`**（不要用上下文里的旧版本）。内容有变就以文件为准：重跑 `$HV pages`，并**重做 `speech.tts.md`**（它逐行对应 `speech.md`，行数和行序都会变），再 `$HV check tts-text`。**不要再跑 `$HV check speech`**：审核版已定，工具的两级切分规则只是建议，重跑只会报出人工判断过的“错误”。
+**用户确认后，第一步：用 `read` 重新读取整个 `speech.txt`**（不要用上下文里的旧版本）。内容有变就以文件为准：重跑 `$HV pages`，并**重做 `speech.tts.txt`**（它逐行对应 `speech.txt`，行数和行序都会变），再 `$HV check tts-text`。**不要再跑 `$HV check speech`**：审核版已定，工具的两级切分规则只是建议，重跑只会报出人工判断过的“错误”。
 
 确认与磁盘内容一致后，再：
 
@@ -276,13 +276,13 @@ $HV check speech <slug>
 $HV state done <slug> review-speech
 ```
 
-用户要求改，就改 `script.md` / `speech.md`，重跑 `pages`，不要跳过任何一个 review。改动后同样不对被审文件跑 `check script` / `check speech`。
+用户要求改，就改 `script.md` / `speech.txt`，重跑 `pages`，不要跳过任何一个 review。改动后同样不对被审文件跑 `check script` / `check speech`。
 
 ## 6 · tts-text
 
-把 `speech.md` 逐行转成口语稿 `speech.tts.md`：
+把 `speech.txt` 逐行转成口语稿 `speech.tts.txt`：
 
-- 行数、顺序、段落空行与 `speech.md` **完全一致**
+- 行数、顺序、段落空行与 `speech.txt` **完全一致**
 - `##` 标题行不进语音、不进字幕（工具按行数对齐时自动跳过），保留原样即可，不需数字转换
 - 每行去掉行尾句读标点（`。，；：、！？`），TTS 读起来自然；顿号在行中间照常保留
 - 阿拉伯数字、年份、小数、百分比、金额、单位、版本号改成中文读法
@@ -312,9 +312,9 @@ $HV state done <slug> review-speech
 - 缩写还原靠猜：`cfg` config、`req` request、`res` response、`ctx` context、`fn` function、`impl` implementation、`msg` message、`err` error、`arg` argument、`idx` index、`len` length、`init` initialize、`tmp` temporary、`str` string、`num` number、`env` environment、`dir` directory、`pkg` package、`repo` repository、`lib` library、`deps` dependencies、`auth` authentication。猜不准就按音节拆开写（`nginx` → `engine x`)，不要留一坨驼峰让 TTS 自己拼。
 - 专有名同样先拆再考虑音译：`VoidZero` → `void zero`、`napi-rs` → `N API RS`、`oxc` → `O X C`、`ts.Transformer` → `T S transformer`。拆完还读不准，才按 §7 换成中文音译。
 
-**写完必须做一次二次检查（这一条不能省）：** 把 `speech.md` 和 `speech.tts.md` 并排逐行读，**只看带数字和英文的行**：数字每处过三问——① 它在这里是数量、序数还是编号/年份，读法选对了吗？② 位数丢了吗（有零位没读「零」）？③ 量词、单位、万/亿还挂着吗？英文每处过一句——大写转小写了吗、缩写展开成原词了吗、只能逐字母的有没有写开？
+**写完必须做一次二次检查（这一条不能省）：** 把 `speech.txt` 和 `speech.tts.txt` 并排逐行读，**只看带数字和英文的行**：数字每处过三问——① 它在这里是数量、序数还是编号/年份，读法选对了吗？② 位数丢了吗（有零位没读「零」）？③ 量词、单位、万/亿还挂着吗？英文每处过一句——大写转小写了吗、缩写展开成原词了吗、只能逐字母的有没有写开？
 
-- 把改过的数字逐条列出来（原文 → 读法 → 类型），有疑点的句子单独重写这一行，**不要整篇重写**（会破坏与 `speech.md` 的行对齐）。
+- 把改过的数字逐条列出来（原文 → 读法 → 类型），有疑点的句子单独重写这一行，**不要整篇重写**（会破坏与 `speech.txt` 的行对齐）。
 - 只做了阿拉伯数字清理、没做英文标识符整理或二次检查，视为这一步没做完。工具只查得出「还有阿拉伯数字」，查不出「二零」写错，也查不出 `api` 被拼成词。
 
 校验：
@@ -340,7 +340,7 @@ $HV tts <slug> --gpu --voice $SKILL/assets/cloned-voice.wav
 可选：`--model-dir <dir>`、`--force`（全量重合成）、`--only 1,3,5`（只处理这几句）、`--retry`（只重合成 `voice/asr-retry.json` 里的句子）、`--cfg` / `--steps` / `--max-len`（生成参数）、`--rate-tolerance`（语速离群重做阈值，默认 0.25，0 关闭）。工具一次加载模型，逐句合成，裁剪每句首尾静默（句首 ≤50ms、句尾 ≤120ms，-40dB），合成后按每字时长中位数把语速偏离超过阈值的句子换噪声重做（最多 2 次，只留更接近中位的一次），按句间 150ms、段间 400ms、页间 800ms（给翻页音效留静默）拼接，音轨首尾各留静默（`--lead-in-ms` 默认 400、`--tail-ms` 默认 600，成片开场与结尾都先静一拍），写出 `voice/full.wav`、`voice/timeline.json`、`voice/manifest.json`、`subs/final.srt`。
 
 - 音色缺失会直接报错停下，补好 `assets/cloned-voice.wav` 后重跑同一条命令（或设 `VOICE_CLONE_WAV`）。
-- 断点粒度是句子：`speech.tts.md` 某行不变就跳过该句；只改了几句就只重合成那几句。
+- 断点粒度是句子：`speech.tts.txt` 某行不变就跳过该句；只改了几句就只重合成那几句。
 - `manifest.json` 记录了每条语音对应的原文与配音稿，可逐条核对。
 
 **合成完必须逐句回听校验，不能直接进 `compose`：**
@@ -349,7 +349,7 @@ $HV tts <slug> --gpu --voice $SKILL/assets/cloned-voice.wav
 $HV asr <slug>
 ```
 
-工具用 Fun-ASR-Nano 逐句转录 `voice/sent-NNNN.wav`，和 `speech.tts.md` 对应行比对（去掉标点、阿拉伯数字按位转中文读法后算相似度），写出 `voice/asr.json`。
+工具用 Fun-ASR-Nano 逐句转录 `voice/sent-NNNN.wav`，和 `speech.tts.txt` 对应行比对（去掉标点、阿拉伯数字按位转中文读法后算相似度），写出 `voice/asr.json`。
 
 - `--only 3,7`（逗号分隔句号）只转录这几句，不重跑全量；结果合并进 `voice/asr.json`，其余句子保留上次记录。**重查问题音频一律带 `--only`**，模型加载 20 秒一次，别为两句把整片重新转录一遍。
 - 全部相似度 ≥ `--min-similarity`（默认 0.85）才 `ok: true`。
@@ -363,10 +363,10 @@ $HV asr <slug> --only <刚重合成的句号>
 
 - 退出码看的是 `voice/asr-retry.json` 整体：`--only` 没覆盖到的旧问题句仍留在里面，照样非零退出，不会被悄悄放过。
 - `--retry` 只重合成 `voice/asr-retry.json` 里的句子（自动 force）；重合成后再跑 `asr`，能对上就自动从文件里移除，`entries` 清空才算过。
-- 首次全量 `asr` 之后，回环只跑单句 `--only`；只有 `speech.tts.md` 大面积重写、或 `asr.json` 缺失时才重跑全量。
-- 同一句重试 3 轮仍不过：先看 `voice/bad/` 里的存档，读 `voice/asr.json` 的 `asr_text`，判断是 ASR 听错还是 TTS 读糊（中文部分逐字对上、只崩英文标识符 = ASR 英文转写缺陷，属听错）。是听错就改 `speech.tts.md` 的读法：
+- 首次全量 `asr` 之后，回环只跑单句 `--only`；只有 `speech.tts.txt` 大面积重写、或 `asr.json` 缺失时才重跑全量。
+- 同一句重试 3 轮仍不过：先看 `voice/bad/` 里的存档，读 `voice/asr.json` 的 `asr_text`，判断是 ASR 听错还是 TTS 读糊（中文部分逐字对上、只崩英文标识符 = ASR 英文转写缺陷，属听错）。是听错就改 `speech.tts.txt` 的读法：
   - **先按 §6 拆开写**：`VoidZero` → `void zero`、`napi-rs` → `N API RS`、`oxc` → `O X C`、`ts.Transformer` → `T S transformer`。拆开后 TTS 按单词/字母念，ASR 才可能对上。
-  - **拆开仍不过，再整词换成相近发音的中文**：TTS 念中文、ASR 也转中文，同语种才对得上。如 `napi-rs` → `纳皮尔斯`、`WASM` → `瓦森姆`、`VoidZero` → 中文音译。只把字母粘成一坨（`napirs`、`voidzeroe`）、或者只改大小写而不拆词，无效，相似度反而更低。字幕仍来自 `speech.md`，改的只是配音稿。
+  - **拆开仍不过，再整词换成相近发音的中文**：TTS 念中文、ASR 也转中文，同语种才对得上。如 `napi-rs` → `纳皮尔斯`、`WASM` → `瓦森姆`、`VoidZero` → 中文音译。只把字母粘成一坨（`napirs`、`voidzeroe`）、或者只改大小写而不拆词，无效，相似度反而更低。字幕仍来自 `speech.txt`，改的只是配音稿。
   - **问题语句重构**：ASR 总在同一处断错、把句子听成两截的，调整该行断句或换同义说法，让口语更顺（不改语义、不增删内容）。
   - 改完必须重跑 `check tts-text`（`digits_left`、`paragraph_mismatch` 必须为空），再 `$HV tts <slug> --retry` 重合成该句，再 `$HV asr <slug> --only <该句号>`。
   - 反复仍不过才用 `--min-similarity` 放宽；不要直接 `state done tts` 蒙过去。
@@ -390,25 +390,26 @@ $HV compose <slug>
 $HV verify <slug>
 ```
 
-必须 `ok: true`。硬检查：页覆盖完整、字幕条数与句子数一致且文本等于 `speech.md`、音轨与成片时长差 < 0.5s。逐句语速异常只进 `warnings`，不阻断。
+必须 `ok: true`。硬检查：页覆盖完整、字幕条数与句子数一致且文本等于 `speech.txt`、音轨与成片时长差 < 0.5s。逐句语速异常只进 `warnings`，不阻断。
 
 `$HV state done <slug> verify`
 
 ## 硬规则
 
-- `script.md` 一页一段，页数 = slides 数；`speech.md` 段落数 = `script.md` 页数。
-- 字幕文本永远来自 `speech.md`（中文、阿拉伯数字），行尾句读标点由 `tts` 自动去掉（屏幕上拖尾标点很突兀）；`speech.tts.md` 只给 TTS 读，必须保留供排错。
-- `article.md` 保留原文语言，不翻译；翻译只发生在 `speech.md`。
-- 数字读法分两类：数量按数值（二十），年份/编号逐位（二零二四）；`speech.tts.md` 写完必须做二次检查，按数字类型逐处核对读法。
-- 不改原文、不编内容。`check script` / `check speech` **只在 agent 自己写完时跑一次**；一旦过了人工审核点，被审文件（`script.md` / `speech.md`）**不再校验**——人工改过的断句优先于工具规则，重跑只会产出无用告警。
+- `script.md` 一页一段，页数 = slides 数；`speech.txt` 段落数 = `script.md` 页数。
+- 字幕文本永远来自 `speech.txt`（中文、阿拉伯数字），行尾句读标点由 `tts` 自动去掉（屏幕上拖尾标点很突兀）；`speech.tts.txt` 只给 TTS 读，必须保留供排错。
+- `article.md` 保留原文语言，不翻译；翻译只发生在 `speech.txt`。
+- 数字读法分两类：数量按数值（二十），年份/编号逐位（二零二四）；`speech.tts.txt` 写完必须做二次检查，按数字类型逐处核对读法。
+- 不改原文、不编内容。`check script` / `check speech` **只在 agent 自己写完时跑一次**；一旦过了人工审核点，被审文件（`script.md` / `speech.txt`）**不再校验**——人工改过的断句优先于工具规则，重跑只会产出无用告警。
 - 每个审核点结束后必须 `read` 重读被审文件，没重读就不许 `state done`、不许往下走。
-- 审核过的 `script.md` / `speech.md` 是只读的：不许为了让校验变绿而重新断行、补标点、改语序。要动手只能改用户没审的下游（`speech.tts.md`、`index.html`、`cover.html`），`speech.tts.md` 与 `pages.json` 必须按审核版重新生成。
+- 审核过的 `script.md` / `speech.txt` 是只读的：不许为了让校验变绿而重新断行、补标点、改语序。要动手只能改用户没审的下游（`speech.tts.txt`、`index.html`、`cover.html`），`speech.tts.txt` 与 `pages.json` 必须按审核版重新生成。
 - 页时间只能落在句边界上，不按字数估算。
 - 成片不烧字幕；`final.srt` 是给用户后期用的，不要在 ffmpeg 里加 `subtitles`。
 - 每句合成音频都要过 `$HV asr` 回听校验；重查只带 `--only` 跑出问题的那几句；`voice/asr-retry.json` 非空就不许 `state done tts`、不许 `compose`。
 - `voice/bad/` 里的存档是排错证据，校验通过也不删。
 - 截图只走 `$HV screenshot`，不许换浏览器、不许用 playwright 兜底。
 - 截图后必须逐张看图确认高亮颜色与布局；有不合格的就改 `index.html` 重截，不许直接进 `script`。
+- 平台封面必做：`cover.html` + `covers/cover-16x9.png`、`cover-4x3.png`、`cover-3x4.png` 三张都要有，缺一张 `slides` 步就 `done` 不了；截完逐张看图确认居中。
 - 这是粗剪：允许句子偏长、允许停顿不完美，精修交给剪辑器。
 - 任何一步失败先看 `$HV state status`，不要从头重跑。
 
@@ -423,18 +424,18 @@ $HV verify <slug>
 | `invalid asr model directory` | 缺 `~/models/Fun-ASR-Nano-2512/model.pt` 或 `Qwen3-0.6B/tokenizer.json`，补齐或 `--model-dir` / `FUNASR_MODEL_DIR` |
 | `sentences do not match the script` | 跑 `$HV tts <slug> --retry` 重合成，再 `$HV asr <slug> --only <报出的句号>`（只转录这几句）；反复不过看 `voice/bad/` 与 `asr.json` 的 `asr_text` |
 | `no sentence queued in voice/asr-retry.json` | 先跑 `$HV asr`，还没校验就没有待重合成的句子 |
-| `review-speech 未完成` | 先人工审完 `speech.md`，再 `$HV state done <slug> review-speech` |
+| `review-speech 未完成` | 先人工审完 `speech.txt`，再 `$HV state done <slug> review-speech` |
 | `sentence split does not follow the two-level rule` | 按两级切分重排：先把一行里多出来的 `。！？` 拆开（`split_at_sentence_end`），再把超过 20 字符、且有合适逗号类断点的句子拆开（`split_at_clause_break`，顿号不算） |
 | `分句拼不回 article.md` | 仅同语言时出现：`article.md` 混进了标题/导航，或分句时改了字 |
-| `有句子不是中文` | `speech.md` 漏译或出现了纯标点行 |
-| `speech.md and speech.tts.md line counts differ` | 违反审核点铁律：用户在 `review-speech` 改过 `speech.md`，但没重读重做 `speech.tts.md`。重读 `speech.md` → 重做 `speech.tts.md` → `check tts-text` |
-| `digits_left` 非空 | `speech.tts.md` 还有阿拉伯数字，改中文读法 |
+| `有句子不是中文` | `speech.txt` 漏译或出现了纯标点行 |
+| `speech.txt and speech.tts.txt line counts differ` | 违反审核点铁律：用户在 `review-speech` 改过 `speech.txt`，但没重读重做 `speech.tts.txt`。重读 `speech.txt` → 重做 `speech.tts.txt` → `check tts-text` |
+| `digits_left` 非空 | `speech.tts.txt` 还有阿拉伯数字，改中文读法 |
 | 数字读法念错（如 `20` 变 `二零`、`105` 变 `一百五`） | `check tts-text` 查不出来；回 §6 做二次检查，按数量/编号分类重写那几行，再重跑 `check tts-text` |
-| `asr` 卡在英文标识符句（`napi-rs`、`WASM`、`ts.Transformer` 相似度低） | ASR 英文转写缺陷，非读错；回 §7 改 `speech.tts.md` 读法（先按 §6 拆词：`napi-rs` → `N API RS`；还不过再整词换相近发音的中文）→ `check tts-text` → `tts --retry` → `asr --only <该句号>` |
+| `asr` 卡在英文标识符句（`napi-rs`、`WASM`、`ts.Transformer` 相似度低） | ASR 英文转写缺陷，非读错；回 §7 改 `speech.tts.txt` 读法（先按 §6 拆词：`napi-rs` → `N API RS`；还不过再整词换相近发音的中文）→ `check tts-text` → `tts --retry` → `asr --only <该句号>` |
 | `pages.json 不连续` | 重跑 `$HV pages <slug>`，别手改 from/to |
 | `script.md 页数与 slides 不一致` | 补页或删页后重跑 `$HV check script`（仅限 agent 自己写的稿；审核后不再校验） |
-| 脚本念着别扭、有语病 | `check script` 查不出来；回 §2 的通顺检查逐段重读，改完连带重做 `speech.md` → `pages` → `speech.tts.md` |
-| `speech.md 段落数与 script.md 不一致` | 按页重新分句，重跑 `$HV pages` |
+| 脚本念着别扭、有语病 | `check script` 查不出来；回 §2 的通顺检查逐段重读，改完连带重做 `speech.txt` → `pages` → `speech.tts.txt` |
+| `speech.txt 段落数与 script.md 不一致` | 按页重新分句，重跑 `$HV pages` |
 | `ffmpeg 合成失败` | 看 stderr；多半是图片路径或 concat 列表 |
 | `wgpu` 后端加载/初始化失败 | 去掉 `--gpu` 回退 CPU 重跑同一命令；已合成的句子不重跑 |
 | 合成太慢 | 正常：CPU 推理 4.3GB 模型；已合成的句子不会重跑 |

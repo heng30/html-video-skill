@@ -59,8 +59,8 @@ pub fn evaluate(root: &Path) -> Value {
 
     for name in [
         "article.md",
-        "speech.md",
-        "speech.tts.md",
+        "speech.txt",
+        "speech.tts.txt",
         "voice/full.wav",
         "voice/timeline.json",
         "subs/final.srt",
@@ -124,7 +124,7 @@ pub fn evaluate(root: &Path) -> Value {
         for (index, (cue, sentence)) in cues.iter().zip(&sentences).enumerate() {
             let expected = text::strip_tail_punct(sentence["text"].as_str().unwrap_or(""));
             if expected != cue.1.as_str() {
-                problems.push(format!("subtitle {} does not match speech.md", index + 1));
+                problems.push(format!("subtitle {} does not match speech.txt", index + 1));
             }
         }
     }
