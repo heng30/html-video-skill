@@ -53,6 +53,28 @@ pub fn visual_len(text: &str) -> f64 {
         .sum()
 }
 
+/// 语速单位：一个汉字 = 1，一个英文单词 = 1。
+/// 逐字符数会把 `VoidZero` 当成 8 个字，带英文标识符的句子因此被判成语速异常，
+/// `tts` 反复重合成、`verify` 报一串假警告。
+pub fn speech_units(text: &str) -> f64 {
+    let mut units = 0.0;
+    let mut in_word = false;
+    for c in text.chars() {
+        if ('\u{4e00}'..='\u{9fff}').contains(&c) {
+            units += 1.0;
+            in_word = false;
+        } else if c.is_alphabetic() {
+            if !in_word {
+                units += 1.0;
+                in_word = true;
+            }
+        } else {
+            in_word = false;
+        }
+    }
+    units
+}
+
 pub fn cjk_ratio(text: &str) -> f64 {
     let letters: Vec<char> = text.chars().filter(|c| c.is_alphabetic()).collect();
     if letters.is_empty() {
@@ -103,4 +125,22 @@ pub fn count_slides(root: &Path) -> usize {
                 .count()
         })
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::speech_units;
+
+    #[test]
+    fn english_word_counts_as_one_unit() {
+        assert_eq!(speech_units("它找得到差异"), 6.0);
+        assert_eq!(speech_units("用 VoidZero 打包"), 1.0 + 1.0 + 2.0);
+        assert_eq!(speech_units("VoidZero"), 1.0);
+        assert_eq!(speech_units("napi-rs"), 2.0);
+        assert_eq!(speech_units("它叫 O X C"), 2.0 + 3.0);
+        assert_eq!(speech_units(""), 0.0);
+        assert_eq!(speech_units("   "), 0.0);
+        // 混排时数和逐字符算出来的差距，正是"英文让语速爆表"的根因
+        assert!(speech_units("ts.Transformer") < "ts.Transformer".chars().count() as f64);
+    }
 }

@@ -18,6 +18,8 @@ template/
     ├── quote.html         引语
     ├── image.html         图文
     ├── steps.html         三步流程
+    ├── code.html           代码页
+    ├── code-image.html     代码 + 输出图
     └── closing.html       收尾
 ```
 
@@ -48,9 +50,11 @@ template/
 | `quote.html` | 幕间、可查证的引语 | 伪造名人名言 |
 | `image.html` | 原文确有配图 | 图与论点无关、或一页塞两张 |
 | `steps.html` | 三步方法、时间线 | 并列关系（用 rows） |
+| `code.html` | 讲 API 形状、调用顺序、实现片段 | 代码只是摆设、或者要贴整段 30 行以上的源码 |
+| `code-image.html` | 代码 + 它画出来的东西（渲染结果、截图、输出） | 图和代码没有直接因果关系 |
 | `closing.html` | 最后一页，结论 + 边界 | 引入新论据、写“谢谢观看” |
 
-固定页脚：第一页用 `cover`，最后一页用 `closing`，中间 6–12 页从 `thesis / stats / chart / rows / compare / quote / image / steps` 里选。整篇 8–14 页。
+固定页脚：第一页用 `cover`，最后一页用 `closing`，中间 6–12 页从 `thesis / stats / chart / rows / compare / quote / image / steps / code / code-image` 里选。整篇 8–14 页。
 
 ## 字段速查
 
@@ -63,6 +67,8 @@ template/
 - `image`：`.text p`（≤2 段）、`img src="images/img-XX.jpg"`、`figcaption`（内容 + 来源）；正文区自动铺满，图随剩余高度伸缩
 - `.big`（compare 的栏结论）直接加 `hl` 类，用品牌色突显
 - `steps`：三步，`.n`、`b`（动词开头）、`p`（输入/输出/失败回退）
+- `code`：`.code-label`（语言 · 这段代码干什么）、`pre code` 的 `class="language-XXX"`；一页 12–16 行，行号自动加
+- `code-image`：同 `code`，右侧 `figure img`（`images/img-XX.png`）+ `figcaption`（条件与来源）；代码 9–12 行
 - `closing`：`h2`（结论）、`.dek`（成立条件/边界）、`.sign`（作者/日期）
 
 ## 拼装
@@ -89,3 +95,5 @@ cp <skill>/template/skeleton.html <slug>/index.html
 - 数字必须有来源；查不到就删掉，不要用“约”“左右”编一个
 - 正文不能进入页脚：`.foot` 上方留白由 `.body` 的 `flex:1` 自然产生，不要用 `position:absolute`
 - 页脚线是页面唯一的收底 hairline：`.foot` 正上方的内容（图例、最后一行、note）不要再带 `border-top/bottom`，否则会出现两条相近的分割线；图表图例已去线，行列表用 `.row:last-child { border-bottom: none }`
+- 代码块只靠等宽字体、hairline 边框和语法着色区分，不画卡片、不加行号底色；`hljs` 从 CDN 加载（`skeleton.html` 自带），离线时退化成纯文本代码块，行号和布局不受影响
+- 代码里的 `&` 和 `<` 必须写成 `&amp;` / `&lt;`，行号由 `skeleton.html` 的脚本按行生成，不要手写行号

@@ -14,8 +14,8 @@ areverse,silenceremove=start_periods=1:start_silence=0.12:start_threshold=-40dB,
 
 /// 每句最多再合成几次（共 RATE_TRIES + 1 个 take）。
 const RATE_TRIES: usize = 2;
-/// 参与语速统计所需的最少汉字数，太短的句子语速天然偏高。
-const RATE_MIN_CJK: usize = 6;
+/// 参与语速统计所需的最少语速单位（汉字或英文单词），太短的句子语速天然偏高。
+const RATE_MIN_UNITS: f64 = 6.0;
 
 #[derive(clap::Args)]
 pub struct Args {
@@ -161,20 +161,14 @@ fn synthesize(
     Ok(())
 }
 
-fn cjk_chars(text: &str) -> usize {
-    text.chars()
-        .filter(|c| ('\u{4e00}'..='\u{9fff}').contains(c))
-        .count()
-}
-
-/// 每字时长（毫秒）；汉字太少或读不出来返回 `None`，不参与语速统计。
+/// 每单位时长（毫秒）；单位太少或读不出来返回 `None`，不参与语速统计。
 fn rate_ms(path: &Path, text: &str) -> Option<f64> {
-    let cjk = cjk_chars(text);
-    if cjk < RATE_MIN_CJK {
+    let units = crate::text::speech_units(text);
+    if units < RATE_MIN_UNITS {
         return None;
     }
     let (samples, rate) = read_pcm16(path).ok()?;
-    Some(samples.len() as f64 * 1000.0 / rate as f64 / cjk as f64)
+    Some(samples.len() as f64 * 1000.0 / rate as f64 / units)
 }
 
 /// 采样噪声会给每句带来 ±20% 的语速浮动，慢的那一端听着就是拖腔加音色漂移。

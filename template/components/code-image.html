@@ -1,0 +1,43 @@
+<!-- 代码配图页：左边一段代码，右边一张渲染结果/截图。讲“这段代码画出来是什么”最好用。
+     字段：同 code.html；右侧 figure img（images/img-XX.png）+ figcaption（这张图的条件与来源）。
+     代码只留 9–12 行，图占 300px 固定宽度、高度随正文区伸缩；一页只配一张图，图不换行不并排。 -->
+<section class="slide code-image slide-content" data-index="5">
+  <div class="top">
+    <span><span class="sec">06</span> · 效果</span>
+    <span>栏目 · CODE</span>
+  </div>
+  <div class="rule"></div>
+
+  <h2>一边是参数，一边是它画出来的东西</h2>
+  <p class="dek">图不是装饰：它必须就是左边这段代码的输出，条件写进图注。</p>
+
+  <div class="body">
+    <div class="code-split">
+      <div class="code-block">
+        <div class="code-head">
+          <span class="code-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="code-label">Rust · 虚线描边</span>
+        </div>
+        <pre><code class="language-rust">let mut stroke = Stroke::default();
+stroke.width = 6.0;
+stroke.line_cap = LineCap::Round;
+stroke.dash = StrokeDash::new(vec![20.0, 40.0], 0.0);
+
+for i in 0..8 {
+    let t = Transform::identity().pre_translate(0.0, i as f32 * 48.0);
+    pixmap.stroke_path(&amp;path, &amp;paint, &amp;stroke, t, None);
+}
+</code></pre>
+      </div>
+      <figure>
+        <img src="images/img-01.png" alt="这段代码的输出" />
+        <figcaption>图注：什么条件、什么参数下得到的结果</figcaption>
+      </figure>
+    </div>
+  </div>
+
+  <div class="foot">
+    <span>参数与结果之间那条因果链。</span>
+    <span class="en">STROKE · OUTPUT</span>
+  </div>
+</section>

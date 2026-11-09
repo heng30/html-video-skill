@@ -142,8 +142,11 @@ curl -L --fail -A 'Mozilla/5.0' -o images/img-01.jpg '<图片 URL>'
 1. 读 `$SKILL/template/COMPONENTS.md`，按内容选组件
 2. `cp $SKILL/template/skeleton.html <slug>/index.html && cp -r $SKILL/assets/fonts <slug>/fonts`（字体随 index.html 的相对路径 `fonts/OOO.ttc` 加载，避免依赖系统字体；不复制也能跑，只是回落系统字体）
 3. 把 `$SKILL/template/components/*.html` 的 `<section>` 按叙事顺序粘进去，替换文案与序号；关键数字/结论包 `<span class="hl">`
+4. 要贴代码就用 `code.html`（纯代码页）或 `code-image.html`（代码 + 输出图）：一页 12–16 行，`<pre><code class="language-rust">` 里的 `&` 和 `<` 写成 `&amp;` / `&lt;`，行号由 `skeleton.html` 脚本自动加，不要手写；全篇最多两三页
 
 **必须为全文生成全部页面**，8–14 页（短文 5 页起），第一页 `cover`、最后一页 `closing`，不允许只生成前几页。配图用相对路径 `images/img-XX.jpg`。不要写页面局部样式，只用 `base.css` 里的类。每页必须是 `class="slide"` 的 `<section>`，`skeleton.html` 自带的居中样式、←→ 键盘翻页与幻灯片下方圆点页码脚本不要删。关键信息（数字、结论、核心术语）用 `<span class="hl">` 打品牌色，每页 1–3 处；图文页正文区自动铺满，图片随剩余高度伸缩。
+
+代码页的语法着色靠 `skeleton.html` 里的 hljs CDN（`highlight.min.js`）；没网时自动退化成纯文本代码块，行号和布局不变，**不要因为本地预览没颜色就改成手写 `<span>` 上色**。
 
 截图（1920×1080）：
 
@@ -337,7 +340,9 @@ $HV tts <slug> --gpu --voice $SKILL/assets/cloned-voice.wav
 
 命令耗时以十分钟计，**丢后台跑**，不要前台阻塞。
 
-可选：`--model-dir <dir>`、`--force`（全量重合成）、`--only 1,3,5`（只处理这几句）、`--retry`（只重合成 `voice/asr-retry.json` 里的句子）、`--cfg` / `--steps` / `--max-len`（生成参数）、`--rate-tolerance`（语速离群重做阈值，默认 0.25，0 关闭）。工具一次加载模型，逐句合成，裁剪每句首尾静默（句首 ≤50ms、句尾 ≤120ms，-40dB），合成后按每字时长中位数把语速偏离超过阈值的句子换噪声重做（最多 2 次，只留更接近中位的一次），按句间 150ms、段间 400ms、页间 800ms（给翻页音效留静默）拼接，音轨首尾各留静默（`--lead-in-ms` 默认 400、`--tail-ms` 默认 600，成片开场与结尾都先静一拍），写出 `voice/full.wav`、`voice/timeline.json`、`voice/manifest.json`、`subs/final.srt`。
+可选：`--model-dir <dir>`、`--force`（全量重合成）、`--only 1,3,5`（只处理这几句）、`--retry`（只重合成 `voice/asr-retry.json` 里的句子）、`--cfg` / `--steps` / `--max-len`（生成参数）、`--rate-tolerance`（语速离群重做阈值，默认 0.25，0 关闭）。工具一次加载模型，逐句合成，裁剪每句首尾静默（句首 ≤50ms、句尾 ≤120ms，-40dB），合成后按**每单位时长**中位数把语速偏离超过阈值的句子换噪声重做（最多 2 次，只留更接近中位的一次），按句间 150ms、段间 400ms、页间 800ms（给翻页音效留静默）拼接，音轨首尾各留静默（`--lead-in-ms` 默认 400、`--tail-ms` 默认 600，成片开场与结尾都先静一拍），写出 `voice/full.wav`、`voice/timeline.json`、`voice/manifest.json`、`subs/final.srt`。
+
+**语速单位：一个汉字 = 一个英文单词 = 1**（`O X C` 算 3，`napi-rs` 算 2）。不要按字符数算：`VoidZero` 逐字符是 8 个字，一句里带几个英文标识符就会被判成语速异常，白白重合成半天。
 
 - 音色缺失会直接报错停下，补好 `assets/cloned-voice.wav` 后重跑同一条命令（或设 `VOICE_CLONE_WAV`）。
 - 断点粒度是句子：`speech.tts.txt` 某行不变就跳过该句；只改了几句就只重合成那几句。
@@ -400,7 +405,7 @@ $HV compose <slug>
 $HV verify <slug>
 ```
 
-必须 `ok: true`。硬检查：页覆盖完整、字幕条数与句子数一致且文本等于 `speech.txt`、音轨与成片时长差 < 0.5s。逐句语速异常只进 `warnings`，不阻断。
+必须 `ok: true`。硬检查：页覆盖完整、字幕条数与句子数一致且文本等于 `speech.txt`、音轨与成片时长差 < 0.5s。逐句语速异常（同样按「一个汉字 = 一个英文单词 = 1」算，0.08–0.60 秒/单位）只进 `warnings`，不阻断。
 
 `$HV state done <slug> verify`
 

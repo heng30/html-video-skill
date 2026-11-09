@@ -234,3 +234,41 @@ h2.big { font-size: 44px; }
 .chart .legend { padding-top: 2px; margin-top: 6px; display: flex; gap: 28px; }
 .chart .legend div { font-size: 9px; line-height: 1.5; color: var(--muted); }
 .chart .legend b { display: block; font-family: var(--mono); font-size: 8px; letter-spacing: 0.14em; color: var(--ink); font-weight: 500; margin-bottom: 3px; }
+
+/* ---------- 代码块：等宽 + hairline 边框，一页一段代码，不用卡片阴影 ---------- */
+.code-slide .body { display: flex; flex-direction: column; }
+.code-block { display: flex; flex-direction: column; flex: 1; min-height: 0; border: 1px solid var(--rule); background: #f8f7f3; overflow: hidden; }
+.code-head { flex: none; display: flex; align-items: center; gap: 10px; padding: 5px 10px; border-bottom: 1px solid var(--rule); background: #f1efe9; }
+.code-dots { display: inline-flex; gap: 4px; flex: none; }
+.code-dots i { display: block; width: 6px; height: 6px; border-radius: 50%; }
+.code-dots i:nth-child(1) { background: #e3a79f; }
+.code-dots i:nth-child(2) { background: #ead3a0; }
+.code-dots i:nth-child(3) { background: #aec9a7; }
+.code-label { margin-left: auto; font-family: var(--mono); font-size: 8px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.code-block pre { flex: 1; min-height: 0; margin: 0; padding: 8px 12px 8px 0; overflow: hidden; counter-reset: ln; }
+.code-block pre code { display: block; font-family: var(--mono); font-size: 11.5px; line-height: 1.55; color: var(--text); white-space: pre-wrap; overflow-wrap: break-word; tab-size: 4; }
+
+/* 行号：每行包一个 .ln，编号由 CSS 计数器给出（切行脚本在 skeleton.html 里） */
+.code-block .ln { display: block; counter-increment: ln; position: relative; padding-left: 34px; }
+.code-block .ln::before { content: counter(ln); position: absolute; left: 0; width: 24px; text-align: right; font-size: 9px; color: #a9b0b6; }
+
+/* 语法高亮：亮色 token，只在代码块里生效 */
+.hljs-comment, .hljs-quote { color: #98a0a6; font-style: italic; }
+.hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-name { color: #7b3fa0; }
+.hljs-string, .hljs-attr, .hljs-template-tag, .hljs-regexp { color: #2f7a4f; }
+.hljs-number, .hljs-symbol, .hljs-bullet, .hljs-attribute { color: #a65a18; }
+.hljs-title, .hljs-section, .hljs-function .hljs-title { color: var(--signal-text); }
+.hljs-type, .hljs-class .hljs-title, .hljs-built_in { color: #1b6e6b; }
+.hljs-variable, .hljs-template-variable, .hljs-params, .hljs-property { color: var(--text); }
+.hljs-meta, .hljs-meta .hljs-keyword { color: #8a6d2f; }
+.hljs-tag { color: #4e565e; }
+
+/* 行内代码：正文里夹的标识符，不用引号 */
+.inline-code { font-family: var(--mono); font-size: 0.9em; background: #f0eee8; padding: 0 4px; color: var(--signal-text); }
+
+/* ---------- 代码配图：左代码右图，图随剩余高度伸缩 ---------- */
+.code-image .body { display: flex; }
+.code-split { display: grid; grid-template-columns: 1fr 300px; gap: 18px; flex: 1; min-height: 0; }
+.code-split figure { display: flex; flex-direction: column; justify-content: center; min-height: 0; }
+.code-split figure img { display: block; width: 100%; flex: 1; min-height: 0; object-fit: contain; border: 1px solid var(--rule); background: #f8f7f3; }
+.code-split figcaption { flex: none; margin-top: 8px; font-size: 9px; line-height: 1.5; color: var(--muted); }

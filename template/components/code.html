@@ -1,0 +1,41 @@
+<!-- 代码页：一页一段代码，讲 API、讲用法、讲实现片段。全篇最多两三页，多了就是文档不是视频。
+     字段：code-label（语言 · 这段代码干什么）、pre code 的 class="language-XXX"（决定着色语言）。
+     一页放得下 12–16 行：超了先删空行和注释，还超就改 code-image 版式或拆页。
+     代码里的 & 和 < 必须写成 &amp; / &lt;；行号由脚本自动加，不要手写。 -->
+<section class="slide code-slide slide-content" data-index="4">
+  <div class="top">
+    <span><span class="sec">05</span> · 用法</span>
+    <span>栏目 · CODE</span>
+  </div>
+  <div class="rule"></div>
+
+  <h2>标题写这段代码证明了什么</h2>
+  <p class="dek">一句话说清这段代码在做什么，不要复述代码本身。</p>
+
+  <div class="body">
+    <div class="code-block">
+      <div class="code-head">
+        <span class="code-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span class="code-label">Rust · 填充一条闭合路径</span>
+      </div>
+      <pre><code class="language-rust">let mut paint = Paint::default();
+paint.set_color_rgba8(50, 127, 150, 200);
+paint.anti_alias = true;
+
+let mut pb = PathBuilder::new();
+pb.move_to(60.0, 60.0);
+pb.line_to(160.0, 940.0);
+let path = pb.finish().unwrap();
+
+let mut pixmap = Pixmap::new(1000, 1000).unwrap();
+pixmap.fill_path(&amp;path, &amp;paint, FillRule::Winding, Transform::identity(), None);
+pixmap.save_png("image.png").unwrap();
+</code></pre>
+    </div>
+  </div>
+
+  <div class="foot">
+    <span>看完这段代码该记住的那一句。</span>
+    <span class="en">MODULE · FUNCTION</span>
+  </div>
+</section>

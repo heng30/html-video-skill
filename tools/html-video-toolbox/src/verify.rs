@@ -4,8 +4,9 @@ use anyhow::{Result, anyhow};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
-const MIN_SEC_PER_CHAR: f64 = 0.08;
-const MAX_SEC_PER_CHAR: f64 = 0.60;
+/// 每秒多少语速单位算正常：单位 = 一个汉字或一个英文单词。
+const MIN_SEC_PER_UNIT: f64 = 0.08;
+const MAX_SEC_PER_UNIT: f64 = 0.60;
 
 #[derive(clap::Args)]
 pub struct Args {
@@ -131,12 +132,12 @@ pub fn evaluate(root: &Path) -> Value {
 
     for sentence in &sentences {
         let text = sentence["text"].as_str().unwrap_or("");
-        let chars = crate::text::visual_len(text);
+        let units = crate::text::speech_units(text);
         let seconds = sentence["duration_ms"].as_f64().unwrap_or(0.0) / 1000.0;
-        let per_char = if chars > 0.0 { seconds / chars } else { 0.0 };
-        if chars > 0.0 && !(MIN_SEC_PER_CHAR..=MAX_SEC_PER_CHAR).contains(&per_char) {
+        let per_unit = if units > 0.0 { seconds / units } else { 0.0 };
+        if units > 0.0 && !(MIN_SEC_PER_UNIT..=MAX_SEC_PER_UNIT).contains(&per_unit) {
             warnings.push(format!(
-                "sentence {} speaking rate out of range: {seconds:.2}s / {chars} chars",
+                "sentence {} speaking rate out of range: {seconds:.2}s / {units} units",
                 sentence["index"]
             ));
         }
