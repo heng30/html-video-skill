@@ -20,6 +20,7 @@ disable-model-invocation: true
 |---|---|---|
 | `fetch` | `url`、`article.md`、`title.md`、`images/` | agent |
 | `slides` | `index.html`、`slides/slide-01.png …` | agent + `screenshot` |
+| `covers`（可选） | `covers/cover-16x9.png`、`cover-4x3.png`、`cover-3x4.png` | agent + `screenshot --covers` |
 | `script` | `script.md` | agent（每页一段演讲稿） |
 | `review-script` | 无（人工断点） | 人 |
 | `speech` | `speech.md`、`slides/pages.json` | agent（分句）+ `pages` |
@@ -41,6 +42,8 @@ disable-model-invocation: true
 ├── index.html             # 960×540 幻灯片（组件搭积木）
 ├── slides/                # slide-01.png … 1920×1080
 │   └── pages.json         # 句子 → 页 映射
+├── cover.html             # 三张平台封面（可选，从 template/cover.html 复制）
+├── covers/                # cover-16x9.png / cover-4x3.png / cover-3x4.png（可选）
 ├── speech.md              # 分句后的中文口播稿，每页一段，阿拉伯数字
 ├── speech.tts.md          # 配音稿，数字转中文读法，行与 speech.md 一一对应（agent 自己二次检查读法，不入人工审）
 ├── voice/
@@ -153,6 +156,18 @@ $HV screenshot <slug>/index.html -o <slug>/slides
 **截图后必须逐张自查**：用 `read` 打开 `slides/slide-*.png` 每一张，确认 ① `<span class="hl">` 高亮颜色正常显示（不是黑/白/透明、同一页不混用两种高亮色）；② 布局没塌——无文字溢出、无重叠、无被裁切、无大片空白、图片没变形、标题与正文没贴边。任何一张不合格就回改 `index.html`，重跑 `$HV screenshot`，直到全部通过。不许凭记忆认为「应该没问题」。
 
 这一步**不写** `pages.json`，它要等分句完成（文件名零填充由 `pages` / `compose` 统一处理）。
+
+**可选·平台封面**：需要横版/竖版发布封面时，用 `$SKILL/template/cover.html` 同一套视觉出三张：
+
+```bash
+cp $SKILL/template/cover.html <slug>/cover.html
+$HV screenshot <slug>/cover.html --covers -o <slug>/covers
+```
+
+- 产物 `covers/cover-16x9.png`（1920×1080）、`covers/cover-4x3.png`（1440×1080）、`covers/cover-3x4.png`（1080×1440），按短边 1080 出图。三个 `<section class="slide">` 的宽高比必须是 16:9 / 4:3 / 3:4，改尺寸或删页都直接报错。
+- 只改三个 `<section>` 里的文案，不动 `cover.html` 的布局样式。
+- **居中硬规则**：kicker、标题、导语、分隔线、署名这整块内容，在画面里必须**水平居中且垂直居中**。不许偏左、不许压底、不许改成左对齐或上下分栏。截完逐张 `read` 看图，确认居中、无溢出、`<span class="hl">` 颜色正常；不合格就改文案或换更短的标题重截。
+- covers 不是断点步骤，不单独 `state done`。
 
 `$HV state done <slug> slides`
 
