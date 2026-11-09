@@ -24,6 +24,10 @@ pub struct Args {
     /// transcribe only these sentence indexes, comma separated
     #[arg(long)]
     pub only: Option<String>,
+    /// accept these sentence indexes as-is and drop them from asr-retry.json
+    /// (ASR English transcription is unreliable, do not re-synthesize for it), comma separated
+    #[arg(long)]
+    pub accept: Option<String>,
 }
 
 fn resolve_model_dir(cli: Option<PathBuf>) -> Result<PathBuf> {
@@ -383,7 +387,20 @@ pub fn run(args: Args) -> Result<()> {
         }));
     }
 
-    let failed = retry_indexes(&root)?;
+    let mut accepted: Vec<usize> = crate::tts::parse_only(args.accept.as_deref())?
+        .map(|set| set.into_iter().collect())
+        .unwrap_or_default();
+    accepted.sort_unstable();
+    for index in &accepted {
+        if let Some(entries) = retry["entries"].as_object_mut() {
+            entries.remove(&index.to_string());
+        }
+    }
+    let mut failed: Vec<usize> = retry["entries"]
+        .as_object()
+        .map(|entries| entries.keys().filter_map(|key| key.parse().ok()).collect())
+        .unwrap_or_default();
+    failed.sort_unstable();
     let report_path = voice_dir.join("asr.json");
     let base = if only.is_some() && report_path.is_file() {
         read_json(&report_path)?["sentences"]
@@ -399,6 +416,7 @@ pub fn run(args: Args) -> Result<()> {
         "min_similarity": args.min_similarity,
         "sentences": merge_results(base, results),
         "retry": failed,
+        "accepted": accepted,
     });
     write_json(&report_path, &report)?;
     write_json(&path, &retry)?;
