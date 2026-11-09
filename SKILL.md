@@ -320,7 +320,7 @@ $HV tts <slug> --gpu --voice $SKILL/assets/cloned-voice.wav
 
 命令耗时以十分钟计，**丢后台跑**，不要前台阻塞。
 
-可选：`--model-dir <dir>`、`--force`（全量重合成）、`--only 1,3,5`（只处理这几句）、`--retry`（只重合成 `voice/asr-retry.json` 里的句子）、`--cfg` / `--steps` / `--max-len`（生成参数）、`--rate-tolerance`（语速离群重做阈值，默认 0.25，0 关闭）。工具一次加载模型，逐句合成，裁剪每句首尾静默（句首 ≤50ms、句尾 ≤120ms，-40dB），合成后按每字时长中位数把语速偏离超过阈值的句子换噪声重做（最多 2 次，只留更接近中位的一次），按句间 150ms、段间 400ms、页间 800ms（给翻页音效留静默）拼接，写出 `voice/full.wav`、`voice/timeline.json`、`voice/manifest.json`、`subs/final.srt`。
+可选：`--model-dir <dir>`、`--force`（全量重合成）、`--only 1,3,5`（只处理这几句）、`--retry`（只重合成 `voice/asr-retry.json` 里的句子）、`--cfg` / `--steps` / `--max-len`（生成参数）、`--rate-tolerance`（语速离群重做阈值，默认 0.25，0 关闭）。工具一次加载模型，逐句合成，裁剪每句首尾静默（句首 ≤50ms、句尾 ≤120ms，-40dB），合成后按每字时长中位数把语速偏离超过阈值的句子换噪声重做（最多 2 次，只留更接近中位的一次），按句间 150ms、段间 400ms、页间 800ms（给翻页音效留静默）拼接，音轨首尾各留 600ms 静默（`--lead-in-ms` / `--tail-ms`，成片开场与结尾都先静一拍），写出 `voice/full.wav`、`voice/timeline.json`、`voice/manifest.json`、`subs/final.srt`。
 
 - 音色缺失会直接报错停下，补好 `assets/cloned-voice.wav` 后重跑同一条命令（或设 `VOICE_CLONE_WAV`）。
 - 断点粒度是句子：`speech.tts.md` 某行不变就跳过该句；只改了几句就只重合成那几句。
@@ -363,7 +363,7 @@ $HV asr <slug> --only <刚重合成的句号>
 $HV compose <slug>
 ```
 
-按 `pages.json` 每页图显示到「下一页第一句开始前 200ms」，首页从 0、末页到音轨结束；挂 `voice/full.wav`，导出**不带字幕**的 `final.mp4`，同时把 `subs/final.srt` 复制成 `final.srt`。每次翻页（除首页外每页切点）叠一次 `assets/page-flip.mp3` 翻页音效（音量 `--flip-gain`，默认 0.5，0 关闭）：音效末尾对齐切页点、整段落在 `tts` 留的页间静默里，不盖人声；页间静默不足 0.55s 时报警告，用 `tts --force` 重跑音轨。音效内置在二进制里，混音写临时轨、不改 `voice/full.wav`，音轨总长与字幕时间轴不变（页间静默本来就写进 `timeline.json` 与 `subs/final.srt`）。用户随后在剪辑器里自行导入字幕并精修。
+按 `pages.json` 每页图显示到「下一页第一句开始前 200ms」，首页从 0、末页到音轨结束（含 `tts` 留的 600ms 尾静默，画面停住再收尾）；挂 `voice/full.wav`，导出**不带字幕**的 `final.mp4`，同时把 `subs/final.srt` 复制成 `final.srt`。每次翻页（除首页外每页切点）叠一次 `assets/page-flip.mp3` 翻页音效（音量 `--flip-gain`，默认 0.5，0 关闭）：音效末尾对齐切页点、整段落在 `tts` 留的页间静默里，不盖人声；页间静默不足 0.55s 时报警告，用 `tts --force` 重跑音轨。音效内置在二进制里，混音写临时轨、不改 `voice/full.wav`，音轨总长与字幕时间轴不变（页间静默本来就写进 `timeline.json` 与 `subs/final.srt`）。用户随后在剪辑器里自行导入字幕并精修。
 
 `$HV state done <slug> compose`
 

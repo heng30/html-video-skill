@@ -50,8 +50,11 @@ pub struct Args {
     #[arg(long, default_value_t = 0.25)]
     pub rate_tolerance: f64,
     /// silence at the head of the track, so the video opens with a beat before speech
-    #[arg(long, default_value_t = 1000)]
+    #[arg(long, default_value_t = 600)]
     pub lead_in_ms: u64,
+    /// silence at the tail of the track, so the last word is not cut off at the frame edge
+    #[arg(long, default_value_t = 600)]
+    pub tail_ms: u64,
 }
 
 pub(crate) fn parse_only(only: Option<&str>) -> Result<Option<Vec<usize>>> {
@@ -482,6 +485,11 @@ pub fn run(args: Args) -> Result<()> {
             "duration_ms": end_ms - start_ms,
         });
     }
+    let tail_frames = SAMPLE_RATE as u64 * args.tail_ms / 1000;
+    for _ in 0..tail_frames {
+        writer.write_sample(0i16)?;
+    }
+    cursor += tail_frames;
     writer.finalize().context("failed to finalize full.wav")?;
 
     let total_ms = ms(cursor);
@@ -517,6 +525,7 @@ pub fn run(args: Args) -> Result<()> {
         "rate_retried": redo,
         "full": full_path.display().to_string(),
         "lead_in_ms": args.lead_in_ms,
+        "tail_ms": args.tail_ms,
         "duration_ms": total_ms,
         "srt": srt_path.display().to_string(),
     }));
