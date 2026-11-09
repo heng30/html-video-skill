@@ -50,7 +50,7 @@ pub struct Args {
     #[arg(long, default_value_t = 0.25)]
     pub rate_tolerance: f64,
     /// silence at the head of the track, so the video opens with a beat before speech
-    #[arg(long, default_value_t = 600)]
+    #[arg(long, default_value_t = 400)]
     pub lead_in_ms: u64,
     /// silence at the tail of the track, so the last word is not cut off at the frame edge
     #[arg(long, default_value_t = 600)]
