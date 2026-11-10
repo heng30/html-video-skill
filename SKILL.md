@@ -309,13 +309,14 @@ $HV state done <slug> review-speech
 | 形态 | 写法 | 例子 |
 |---|---|---|
 | 全大写但小写后是个正常词 | **转小写**，按普通单词读 | `NEXT` → `next`；`ONCE` → `once`；`RUST` → `rust`；`ALL` → `all` |
-| 专有名称 / 缩写，只能逐字母念 | **逐字母写开，字母间空格分隔**，不合并成词、不自然拼读 | `API` → `A P I`；`GPU` → `G P U`；`HTTP` → `H T T P`；`SDK` → `S D K`；`LLM` → `L L M` |
+| 缩写，但字母能拼成一个词 | **照原样保留**，整体当一个词读，不要拆成单个字母 | `JSON` → `JSON`；`APP` → `APP`；`RAM` → `RAM` |
+| 专有名称 / 缩写，只能逐字母念 | **逐字母写开，字母间空格分隔**，不合并成词、不自然拼读 | `API` → `A P I`；`GPU` → `G P U`；`HTTP` → `H T T P`；`SDK` → `S D K`；`LLM` → `L L M`；`XML` → `X M L` |
 | 函数名 / 变量名 / 驼峰名（带缩写） | **先还原缩写原词，再按单词、驼峰、连字符拆开** | `getCfg` → `get config`；`parseReqBody` → `parse request body`；`initDB` → `initialize D B`；`useMemo` → `use memo`；`srcDir` → `source directory`；`VoidZero` → `void zero`；`napi-rs` → `N API RS` |
 
 - 缩写还原靠猜：`cfg` config、`req` request、`res` response、`ctx` context、`fn` function、`impl` implementation、`msg` message、`err` error、`arg` argument、`idx` index、`len` length、`init` initialize、`tmp` temporary、`str` string、`num` number、`env` environment、`dir` directory、`pkg` package、`repo` repository、`lib` library、`deps` dependencies、`auth` authentication。猜不准就按音节拆开写（`nginx` → `engine x`)，不要留一坨驼峰让 TTS 自己拼。
 - 专有名同样先拆再考虑音译：`VoidZero` → `void zero`、`napi-rs` → `N API RS`、`oxc` → `O X C`、`ts.Transformer` → `T S transformer`。拆完还读不准，才按 §7 换成中文音译。
 
-**写完必须做一次二次检查（这一条不能省）：** 把 `speech.txt` 和 `speech.tts.txt` 并排逐行读，**只看带数字和英文的行**：数字每处过三问——① 它在这里是数量、序数还是编号/年份，读法选对了吗？② 位数丢了吗（有零位没读「零」）？③ 量词、单位、万/亿还挂着吗？英文每处过一句——大写转小写了吗、缩写展开成原词了吗、只能逐字母的有没有写开？
+**写完必须做一次二次检查（这一条不能省）：** 把 `speech.txt` 和 `speech.tts.txt` 并排逐行读，**只看带数字和英文的行**：数字每处过三问——① 它在这里是数量、序数还是编号/年份，读法选对了吗？② 位数丢了吗（有零位没读「零」）？③ 量词、单位、万/亿还挂着吗？英文每处过一句——大写转小写了吗、缩写展开成原词了吗、只能逐字母的有没有写开（`JSON` / `APP` / `RAM` 这类能拼成词的缩写不拆）？
 
 - 把改过的数字逐条列出来（原文 → 读法 → 类型），有疑点的句子单独重写这一行，**不要整篇重写**（会破坏与 `speech.txt` 的行对齐）。
 - 只做了阿拉伯数字清理、没做英文标识符整理或二次检查，视为这一步没做完。工具只查得出「还有阿拉伯数字」，查不出「二零」写错，也查不出 `api` 被拼成词。
@@ -339,6 +340,8 @@ $HV tts <slug> --gpu --voice $SKILL/assets/cloned-voice.wav
 **必须先用 `--gpu` 跑；日志出现 wgpu 初始化/加载失败或进程报错退出时，才去掉 `--gpu` 回退 CPU 重跑同一条命令**（不加 `--gpu` 即默认 CPU `flex` 后端）。成功标志是日志出现 `loading model ... on wgpu/gpu`，随后逐句 `[N/M]`；回退 CPU 时对应 `on flex/cpu`。
 
 命令耗时以十分钟计，**丢后台跑**，不要前台阻塞。
+
+**开跑前必须确认 `slides/pages.json` 是最新的**：页间 800ms 静默的位置由它决定（不是 `speech.txt` 的段落）。`$HV pages` 必须在最终版 `speech.txt` 定稿后跑过，`pages.json` 最后一条的 `to` 要等于句子总数。`pages.json` 比 `speech.txt` 旧，800ms 就会落在错的句子上，`compose` 时翻页音效会叠进人声。
 
 可选：`--model-dir <dir>`、`--force`（全量重合成）、`--only 1,3,5`（只处理这几句）、`--retry`（只重合成 `voice/asr-retry.json` 里的句子）、`--cfg` / `--steps` / `--max-len`（生成参数）、`--rate-tolerance`（语速离群重做阈值，默认 0.25，0 关闭）。工具一次加载模型，逐句合成，裁剪每句首尾静默（句首 ≤50ms、句尾 ≤120ms，-40dB），合成后按**每单位时长**中位数把语速偏离超过阈值的句子换噪声重做（最多 2 次，只留更接近中位的一次），按句间 150ms、段间 400ms、页间 800ms（给翻页音效留静默）拼接，音轨首尾各留静默（`--lead-in-ms` 默认 400、`--tail-ms` 默认 600，成片开场与结尾都先静一拍），写出 `voice/full.wav`、`voice/timeline.json`、`voice/manifest.json`、`subs/final.srt`。
 
@@ -395,7 +398,7 @@ $HV asr <slug> --accept 11,22     # 只接受这几句，其余仍按相似度�
 $HV compose <slug>
 ```
 
-按 `pages.json` 每页图显示到「下一页第一句开始前 200ms」，首页从 0、末页到音轨结束（含 `tts` 留的 600ms 尾静默，画面停住再收尾）；挂 `voice/full.wav`，导出**不带字幕**的 `final.mp4`，同时把 `subs/final.srt` 复制成 `final.srt`。每次翻页（除首页外每页切点）叠一次 `assets/page-flip.mp3` 翻页音效（音量 `--flip-gain`，默认 0.5，0 关闭）：音效末尾对齐切页点、整段落在 `tts` 留的页间静默里，不盖人声；页间静默不足 0.55s 时报警告，用 `tts --force` 重跑音轨。音效内置在二进制里，混音写临时轨、不改 `voice/full.wav`，音轨总长与字幕时间轴不变（页间静默本来就写进 `timeline.json` 与 `subs/final.srt`）。用户随后在剪辑器里自行导入字幕并精修。
+按 `pages.json` 每页图显示到「下一页第一句开始前 200ms」，首页从 0、末页到音轨结束（含 `tts` 留的 600ms 尾静默，画面停住再收尾）；挂 `voice/full.wav`，导出**不带字幕**的 `final.mp4`，同时把 `subs/final.srt` 复制成 `final.srt`。每次翻页（除首页外每页切点）叠一次 `assets/page-flip.mp3` 翻页音效（音量 `--flip-gain`，默认 0.5，0 关闭）：音效末尾对齐切页点、整段落在 `tts` 留的页间静默里，不盖人声；页间静默不足 0.55s 时报警告：先查 `slides/pages.json` 是不是最新的（`to` 等于句子总数、与 `voice/timeline.json` 的 800ms 位置对得上），不是就先 `$HV pages <slug>` 再重跑 `$HV tts`（**不加 `--force`**，句子没变就跳过合成，只重拼接、只改静默，几分钟完事）；确认 `pages.json` 没问题才考虑 `--force`。`--flip-gain` 调低只是把重叠变小，不算修好。音效内置在二进制里，混音写临时轨、不改 `voice/full.wav`，音轨总长与字幕时间轴不变（页间静默本来就写进 `timeline.json` 与 `subs/final.srt`）。用户随后在剪辑器里自行导入字幕并精修。
 
 `$HV state done <slug> compose`
 
@@ -451,6 +454,7 @@ $HV verify <slug>
 | `script.md 页数与 slides 不一致` | 补页或删页后重跑 `$HV check script`（仅限 agent 自己写的稿；审核后不再校验） |
 | 脚本念着别扭、有语病 | `check script` 查不出来；回 §2 的通顺检查逐段重读，改完连带重做 `speech.txt` → `pages` → `speech.tts.txt` |
 | `speech.txt 段落数与 script.md 不一致` | 按页重新分句，重跑 `$HV pages` |
+| `compose` 报 `page turn ... has only 400ms of silence` | `slides/pages.json` 与 `voice/timeline.json` 不同步（通常是先 `tts` 后重跑 `pages`）。重跑 `$HV pages` → `$HV tts`（不加 `--force`，只重拼接）→ `$HV compose`；别用 `--flip-gain` 压低音效糊过去 |
 | `ffmpeg 合成失败` | 看 stderr；多半是图片路径或 concat 列表 |
 | `wgpu` 后端加载/初始化失败 | 去掉 `--gpu` 回退 CPU 重跑同一命令；已合成的句子不重跑 |
 | 合成太慢 | 正常：CPU 推理 4.3GB 模型；已合成的句子不会重跑 |
