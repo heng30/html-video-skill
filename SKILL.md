@@ -144,7 +144,7 @@ curl -L --fail -A 'Mozilla/5.0' -o images/img-01.jpg '<图片 URL>'
 3. 把 `$SKILL/template/components/*.html` 的 `<section>` 按叙事顺序粘进去，替换文案与序号；关键数字/结论包 `<span class="hl">`
 4. 要贴代码就用 `code.html`（纯代码页）或 `code-image.html`（代码 + 输出图）：一页 12–16 行，`<pre><code class="language-rust">` 里的 `&` 和 `<` 写成 `&amp;` / `&lt;`，行号由 `skeleton.html` 脚本自动加，不要手写；全篇最多两三页
 
-**必须为全文生成全部页面**，8–14 页（短文 5 页起），第一页 `cover`、最后一页 `closing`，不允许只生成前几页。配图用相对路径 `images/img-XX.jpg`。不要写页面局部样式，只用 `base.css` 里的类。每页必须是 `class="slide"` 的 `<section>`，`skeleton.html` 自带的居中样式、←→ 键盘翻页与幻灯片下方圆点页码脚本不要删。关键信息（数字、结论、核心术语）用 `<span class="hl">` 打品牌色，每页 1–3 处；图文页正文区自动铺满，图片随剩余高度伸缩。
+**必须为全文生成全部页面**，8–14 页（短文 5 页起），第一页 `cover`、最后一页 `closing`，不允许只生成前几页。配图用相对路径 `images/img-XX.jpg`。不要写页面局部样式，只用 `base.css` 里的类。每页必须是 `class="slide"` 的 `<section>`，`skeleton.html` 自带的居中样式、←→ 键盘翻页与幻灯片下方圆点页码脚本不要删。关键信息（数字、结论、核心术语）用 `<span class="hl">` 打品牌色，每页 1–3 处；图文页正文区自动铺满，图片随剩余高度伸缩。**品牌色只给关键数据与重点文字**：箭头、连接符（`<span class="arrow">` 的 `→` / `×` 等）一律用中性色（`--muted` / `--soft`），不许染品牌色，也不许把品牌色铺到装饰元素、边框、图标上。
 
 代码页的语法着色靠 `skeleton.html` 里的 hljs CDN（`highlight.min.js`）；没网时自动退化成纯文本代码块，行号和布局不变，**不要因为本地预览没颜色就改成手写 `<span>` 上色**。
 
@@ -343,7 +343,7 @@ $HV tts <slug> --gpu --voice $SKILL/assets/cloned-voice.wav
 
 **开跑前必须确认 `slides/pages.json` 是最新的**：页间 800ms 静默的位置由它决定（不是 `speech.txt` 的段落）。`$HV pages` 必须在最终版 `speech.txt` 定稿后跑过，`pages.json` 最后一条的 `to` 要等于句子总数。`pages.json` 比 `speech.txt` 旧，800ms 就会落在错的句子上，`compose` 时翻页音效会叠进人声。
 
-可选：`--model-dir <dir>`、`--force`（全量重合成）、`--only 1,3,5`（只处理这几句）、`--retry`（只重合成 `voice/asr-retry.json` 里的句子）、`--cfg` / `--steps` / `--max-len`（生成参数）、`--rate-tolerance`（语速离群重做阈值，默认 0.25，0 关闭）。工具一次加载模型，逐句合成，裁剪每句首尾静默（句首 ≤50ms、句尾 ≤120ms，-40dB），合成后按**每单位时长**中位数把语速偏离超过阈值的句子换噪声重做（最多 2 次，只留更接近中位的一次），按句间 150ms、段间 400ms、页间 800ms（给翻页音效留静默）拼接，音轨首尾各留静默（`--lead-in-ms` 默认 400、`--tail-ms` 默认 600，成片开场与结尾都先静一拍），写出 `voice/full.wav`、`voice/timeline.json`、`voice/manifest.json`、`subs/final.srt`。
+可选：`--model-dir <dir>`、`--force`（全量重合成）、`--only 1,3,5`（只处理这几句）、`--retry`（只重合成 `voice/asr-retry.json` 里的句子）、`--cfg` / `--steps` / `--max-len`（生成参数）、`--rate-tolerance`（语速离群重做阈值，默认 0.25，0 关闭）。工具一次加载模型，逐句合成，裁剪每句首尾静默（句首 ≤50ms、句尾 ≤120ms，-40dB），合成后按**每单位时长**中位数把语速偏离超过阈值的句子换噪声重做（最多 2 次，只留更接近中位的一次），按句间 250ms、段间 400ms、页间 800ms（给翻页音效留静默）拼接，音轨首尾各留静默（`--lead-in-ms` 默认 400、`--tail-ms` 默认 600，成片开场与结尾都先静一拍），写出 `voice/full.wav`、`voice/timeline.json`、`voice/manifest.json`、`subs/final.srt`。
 
 **语速单位：一个汉字 = 一个英文单词 = 1**（`O X C` 算 3，`napi-rs` 算 2）。不要按字符数算：`VoidZero` 逐字符是 8 个字，一句里带几个英文标识符就会被判成语速异常，白白重合成半天。
 

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use voxcpm_rs::{GenerateOptions, Prompt, PromptAudio, VoxCPM};
 
 const SAMPLE_RATE: u32 = 48_000;
-const SENTENCE_GAP_MS: u64 = 150;
+const SENTENCE_GAP_MS: u64 = 250;
 const PARAGRAPH_GAP_MS: u64 = 400;
 /// 页间静默：至少要放得下 compose 叠的翻页音效（0.55s），再给切页留点余量。
 const PAGE_GAP_MS: u64 = 800;

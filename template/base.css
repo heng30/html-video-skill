@@ -134,7 +134,7 @@ h2.big { font-size: 44px; }
 .stats.four { grid-template-columns: repeat(4, 1fr); }
 .stat { padding: 14px 0 12px; }
 .stat b { display: block; font-family: var(--mono); font-size: 28px; white-space: nowrap; font-weight: 400; line-height: 1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
-.stat b .arrow { color: var(--signal-text); }
+.stat b .arrow { color: var(--muted); }
 .stat > span { display: block; margin-top: 8px; font-size: 9px; line-height: 1.55; color: var(--muted); }
 
 /* ---------- 行列表 ---------- */
