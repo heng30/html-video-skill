@@ -143,6 +143,24 @@ pub fn evaluate(root: &Path) -> Value {
         }
     }
 
+    // 体检报告由 tts / tts-audit 写；音色、音高、响度的离群只进 warnings。
+    let quality_path = root.join("voice/quality.json");
+    if quality_path.is_file() {
+        let quality = read_json(&quality_path).unwrap_or(json!({}));
+        for entry in quality["sentences"].as_array().cloned().unwrap_or_default() {
+            let score = entry["score"].as_f64().unwrap_or(0.0);
+            if score > 1.0 {
+                warnings.push(format!(
+                    "sentence {} is {score:.2}x off the reference on {} ({}Hz, {:.1}dB)",
+                    entry["index"],
+                    entry["worst"].as_str().unwrap_or("?"),
+                    entry["f0_hz"],
+                    entry["loudness_db"],
+                ));
+            }
+        }
+    }
+
     let audio = probe_duration(&root.join("voice/full.wav"));
     let video = probe_duration(&root.join("final.mp4"));
     if audio < 0.0 || video < 0.0 {

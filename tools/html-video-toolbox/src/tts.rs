@@ -1,4 +1,5 @@
-use crate::text::{self, read_json, write_json};
+use crate::quality::{self, Baseline, Metrics, Tolerances};
+use crate::text::{self, print_json, read_json, write_json};
 use anyhow::{Context, Result, anyhow, bail};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
@@ -11,11 +12,14 @@ const PARAGRAPH_GAP_MS: u64 = 400;
 const PAGE_GAP_MS: u64 = 800;
 const TRIM_FILTER: &str = "silenceremove=start_periods=1:start_silence=0.05:start_threshold=-40dB,\
 areverse,silenceremove=start_periods=1:start_silence=0.12:start_threshold=-40dB,areverse";
+/// 参考音频最多补/降多少 dB，避免把噪声底噪拉上来。
+const REF_MAX_GAIN_DB: f32 = 12.0;
 
-/// 每句最多再合成几次（共 RATE_TRIES + 1 个 take）。
-const RATE_TRIES: usize = 2;
-/// 参与语速统计所需的最少语速单位（汉字或英文单词），太短的句子语速天然偏高。
-const RATE_MIN_UNITS: f64 = 6.0;
+/// 每句最多再合成几次（共 TAKE_TRIES + 1 个 take）。
+const TAKE_TRIES: usize = 2;
+/// 参与语速统计所需的最少语速单位（汉字或英文单词）：太短的句子语速天然偏高，
+/// 拿它们当中位数基准或判离群都会误报。
+const RATE_MIN_UNITS: f64 = 10.0;
 
 #[derive(clap::Args)]
 pub struct Args {
@@ -49,12 +53,35 @@ pub struct Args {
     /// the batch median (0 disables the check)
     #[arg(long, default_value_t = 0.25)]
     pub rate_tolerance: f64,
+    /// redo sentences whose median pitch deviates more than this fraction from
+    /// the reference audio (0 disables the check)
+    #[arg(long, default_value_t = 0.15)]
+    pub pitch_tolerance: f64,
+    /// override the auto-calibrated timbre similarity floor (0 = use the
+    /// distribution measured on the reference audio)
+    #[arg(long, default_value_t = 0.0)]
+    pub min_timbre: f64,
     /// silence at the head of the track, so the video opens with a beat before speech
     #[arg(long, default_value_t = 400)]
     pub lead_in_ms: u64,
     /// silence at the tail of the track, so the last word is not cut off at the frame edge
     #[arg(long, default_value_t = 600)]
     pub tail_ms: u64,
+}
+
+#[derive(clap::Args)]
+pub struct AuditArgs {
+    /// article directory
+    pub dir: PathBuf,
+    /// voice clone reference audio, rebuilds voice/baseline.json
+    #[arg(long, env = "VOICE_CLONE_WAV")]
+    pub voice: Option<PathBuf>,
+    #[arg(long, default_value_t = 0.25)]
+    pub rate_tolerance: f64,
+    #[arg(long, default_value_t = 0.15)]
+    pub pitch_tolerance: f64,
+    #[arg(long, default_value_t = 0.0)]
+    pub min_timbre: f64,
 }
 
 pub(crate) fn parse_only(only: Option<&str>) -> Result<Option<Vec<usize>>> {
@@ -99,7 +126,7 @@ struct Synth {
 }
 
 impl Synth {
-    fn load(model_dir: &Path, voice: &Path, args: &Args, count: usize) -> Result<Self> {
+    fn load(model_dir: &Path, reference: &Path, args: &Args, count: usize) -> Result<Self> {
         eprintln!(
             "loading model {} on {} ({count} sentences to synthesize)",
             model_dir.display(),
@@ -112,13 +139,13 @@ impl Synth {
         };
         let model = VoxCPM::from_local(model_dir, &device)
             .map_err(|e| anyhow!("model load failed: {e}"))?;
-        let sample_rate = model.sample_rate() as u32;
+        let sample_rate = model.sample_rate();
         let options = GenerateOptions {
             cfg_value: args.cfg,
             inference_timesteps: args.steps,
             max_len: args.max_len,
             prompt: Prompt::Reference {
-                audio: PromptAudio::File(voice.to_path_buf()),
+                audio: PromptAudio::File(reference.to_path_buf()),
             },
             ..Default::default()
         };
@@ -129,7 +156,9 @@ impl Synth {
         })
     }
 
-    fn one(&self, text: &str, index: usize, path: &Path) -> Result<()> {
+    /// 同一个 `seed` + 同一句 → 同一段音频，重做可复现、可事后比对。
+    fn one(&self, text: &str, index: usize, path: &Path, seed: u64) -> Result<()> {
+        voxcpm_rs::set_seed(Some(seed));
         let samples = self
             .model
             .generate(text, self.options.clone())
@@ -137,6 +166,10 @@ impl Synth {
         voxcpm_rs::audio::write_wav(path, &samples, self.sample_rate)
             .map_err(|e| anyhow!("write failed {}: {e}", path.display()))
     }
+}
+
+fn take_seed(index: usize, attempt: usize) -> u64 {
+    0x5eed_0000 ^ ((index as u64) << 8) ^ attempt as u64
 }
 
 fn synthesize(
@@ -156,92 +189,259 @@ fn synthesize(
             sentence,
             *index,
             &raw_dir.join(format!("sent-{index:04}.wav")),
+            take_seed(*index, 0),
         )?;
     }
     Ok(())
 }
 
-/// 每单位时长（毫秒）；单位太少或读不出来返回 `None`，不参与语速统计。
-fn rate_ms(path: &Path, text: &str) -> Option<f64> {
-    let units = crate::text::speech_units(text);
-    if units < RATE_MIN_UNITS {
-        return None;
+fn rewrite(path: &Path, samples: &[i16], rate: u32) -> Result<()> {
+    let spec = hound::WavSpec {
+        channels: 1,
+        sample_rate: rate,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut writer = hound::WavWriter::create(path, spec)
+        .with_context(|| format!("cannot write {}", path.display()))?;
+    for sample in samples {
+        writer.write_sample(*sample)?;
     }
-    let (samples, rate) = read_pcm16(path).ok()?;
-    Some(samples.len() as f64 * 1000.0 / rate as f64 / units)
+    writer.finalize()?;
+    Ok(())
 }
 
-/// 采样噪声会给每句带来 ±20% 的语速浮动，慢的那一端听着就是拖腔加音色漂移。
-/// 用本次合成句子的语速中位数当基准，把偏离超过 `tolerance` 的句子换噪声
-/// 重做，只保留离中位数最近的一次（原文件一直在盘上，更差的一次直接丢掉）。
+fn apply_gain(samples: &[i16], gain_db: f32) -> Vec<i16> {
+    let gain = 10f32.powf(gain_db / 20.0);
+    samples
+        .iter()
+        .map(|sample| (*sample as f32 * gain).clamp(-32768.0, 32767.0) as i16)
+        .collect()
+}
+
+/// 读盘上这一句并体检；文件不存在或整段没声返回 `None`。
+fn measure(path: &Path) -> Result<Option<Metrics>> {
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let (samples, rate) = read_pcm16(path)?;
+    let audio = quality::mono_at(&quality::to_f32(&samples), 1, rate);
+    Ok(quality::analyze(&audio, quality::ANA_SR))
+}
+
+/// 把这一句的响度拉到目标、增益钳在 ±[`quality::MAX_GAIN_DB`]，返回补完增益后的体检结果。
+fn level_fix(path: &Path) -> Result<Option<Metrics>> {
+    let (samples, rate) = read_pcm16(path)?;
+    let audio = quality::mono_at(&quality::to_f32(&samples), 1, rate);
+    let Some(mut metrics) = quality::analyze(&audio, quality::ANA_SR) else {
+        return Ok(None);
+    };
+    let Some(needed) = quality::needed_gain(&metrics) else {
+        return Ok(Some(metrics));
+    };
+    let gain = needed.clamp(-quality::MAX_GAIN_DB, quality::MAX_GAIN_DB);
+    if gain.abs() >= 0.1 {
+        rewrite(path, &apply_gain(&samples, gain), rate)?;
+        metrics.loudness_db += gain as f64;
+        metrics.peak_db += gain as f64;
+        eprintln!("    level: {gain:+.1}dB");
+    }
+    Ok(Some(metrics))
+}
+
+/// 参考音频标准化：裁首尾静音 + 响度对齐，写到 `voice/ref.wav`。
+/// 直接吃原始克隆音频，它的静音结构和电平会进条件里，音色漂移跟着变大。
+/// 每次开跑都重做：换音色（`--voice`）时不用记得先手工处理一遍。
+fn prepare_reference(root: &Path, voice: &Path) -> Result<PathBuf> {
+    let target = root.join("voice/ref.wav");
+    let tmp = root.join("voice/.ref.trim.wav");
+    trim(voice, &tmp)?;
+    let (samples, rate) = read_pcm16(&tmp)?;
+    let audio = quality::mono_at(&quality::to_f32(&samples), 1, rate);
+    let gain = quality::analyze(&audio, quality::ANA_SR)
+        .and_then(|metrics| quality::needed_gain(&metrics))
+        .map(|gain| gain.clamp(-REF_MAX_GAIN_DB, REF_MAX_GAIN_DB))
+        .unwrap_or(0.0);
+    rewrite(&target, &apply_gain(&samples, gain), rate)?;
+    let _ = std::fs::remove_file(&tmp);
+    eprintln!(
+        "reference {} → {} ({gain:+.1}dB)",
+        voice.display(),
+        target.display()
+    );
+    Ok(target)
+}
+
+fn tolerances(rate: f64, pitch: f64) -> Tolerances {
+    Tolerances { rate, pitch }
+}
+
+/// 建锚：有 `--voice` 就从参考音频重建（便宜，且锚必须跟着参考走），否则读盘上的。
+fn resolve_baseline(
+    root: &Path,
+    voice: Option<&Path>,
+    cfg: f32,
+    steps: usize,
+    min_timbre: f64,
+) -> Result<Baseline> {
+    let mut baseline = match voice {
+        Some(voice) => {
+            let reference = prepare_reference(root, voice)?;
+            let (samples, rate) = read_pcm16(&reference)?;
+            let audio = quality::mono_at(&quality::to_f32(&samples), 1, rate);
+            Baseline::from_reference(&audio, &reference)?
+        }
+        None => Baseline::load(root).ok_or_else(|| {
+            anyhow!(
+                "missing {} — run tts first or pass --voice",
+                quality::path_of(root).display()
+            )
+        })?,
+    };
+    if min_timbre > 0.0 {
+        baseline.timbre_floor = min_timbre;
+        baseline.timbre_floor_source = "cli --min-timbre".to_string();
+    }
+    if cfg > 0.0 {
+        baseline.cfg = cfg;
+        baseline.steps = steps;
+    }
+    Ok(baseline)
+}
+
+/// 逐句体检 + 打分，写 `voice/quality.json`；返回离群句编号。不改音频。
+fn measure_all(
+    root: &Path,
+    lines: &[text::Sentence],
+    baseline: &mut Baseline,
+    tol: &Tolerances,
+) -> Result<(Vec<Value>, Vec<usize>)> {
+    let voice_dir = root.join("voice");
+    let mut measured: Vec<(usize, String, Metrics)> = Vec::new();
+    for line in lines {
+        let path = voice_dir.join(format!("sent-{:04}.wav", line.index));
+        if let Some(metrics) = measure(&path)? {
+            measured.push((line.index, line.text.clone(), metrics));
+        }
+    }
+
+    let mut rates: Vec<f64> = measured
+        .iter()
+        .filter_map(|(_, text, metrics)| {
+            let units = text::speech_units(text);
+            (units >= RATE_MIN_UNITS)
+                .then(|| quality::rate_ms(metrics, units))
+                .flatten()
+        })
+        .collect();
+    if rates.len() >= 3 {
+        rates.sort_by(f64::total_cmp);
+        baseline.rate_ms = rates[rates.len() / 2];
+    }
+    baseline.sentences = measured.len();
+
+    let mut entries: Vec<Value> = Vec::with_capacity(measured.len());
+    let mut outliers: Vec<usize> = Vec::new();
+    for (index, text, metrics) in &measured {
+        let dev = quality::deviations(metrics, text::speech_units(text), baseline, tol);
+        if dev.score > 1.0 {
+            outliers.push(*index);
+        }
+        entries.push(quality::report_entry(*index, text, metrics, &dev, baseline));
+    }
+    write_json(
+        &root.join("voice/quality.json"),
+        &json!({
+            "ok": outliers.is_empty(),
+            "baseline": {
+                "ref_path": baseline.ref_path,
+                "f0_hz": baseline.f0_hz.round(),
+                "timbre_floor": baseline.timbre_floor,
+                "timbre_floor_source": baseline.timbre_floor_source,
+                "rate_ms": baseline.rate_ms,
+                "cfg": baseline.cfg,
+                "steps": baseline.steps,
+            },
+            "tolerances": { "rate": tol.rate, "pitch": tol.pitch },
+            "sentences": entries,
+            "outliers": outliers,
+        }),
+    )?;
+    Ok((entries, outliers))
+}
+
+/// 离群的句子换种子重做，只留偏差最小的一次（原文件一直在盘上，更差的直接丢）。
 /// 返回真正重做过的句子编号。
-fn redo_rate_outliers(
+fn redo_outliers(
     synth: &Synth,
     root: &Path,
     lines: &[text::Sentence],
-    done: &[usize],
-    tolerance: f64,
+    candidates: &[usize],
+    baseline: &Baseline,
+    tol: &Tolerances,
 ) -> Result<Vec<usize>> {
-    if tolerance <= 0.0 {
-        return Ok(Vec::new());
-    }
     let voice_dir = root.join("voice");
     let raw_dir = voice_dir.join("raw");
-    let mut rates: Vec<(usize, f64)> = Vec::new();
-    for line in lines {
-        let path = voice_dir.join(format!("sent-{:04}.wav", line.index));
-        if let Some(ms) = rate_ms(&path, &line.text) {
-            rates.push((line.index, ms));
-        }
-    }
-    if rates.len() < 3 {
-        return Ok(Vec::new());
-    }
-    let mut sorted: Vec<f64> = rates.iter().map(|r| r.1).collect();
-    sorted.sort_by(f64::total_cmp);
-    let median = sorted[sorted.len() / 2];
-
     let mut retried: Vec<usize> = Vec::new();
-    for (index, ms) in rates {
-        if !done.contains(&index) {
-            continue;
-        }
-        let mut best = (ms / median - 1.0).abs();
-        if best <= tolerance {
-            continue;
-        }
+    for index in candidates {
         let text = &lines[index - 1].text;
-        eprintln!("[rate] sentence {index}: {ms:.0}ms/char vs median {median:.0}ms/char, redoing");
+        let units = text::speech_units(text);
+        let trimmed = voice_dir.join(format!("sent-{index:04}.wav"));
+        let best = match measure(&trimmed)? {
+            Some(metrics) => quality::deviations(&metrics, units, baseline, tol),
+            None => quality::Deviation {
+                score: f64::INFINITY,
+                why: "unreadable",
+            },
+        };
+        if best.score <= 1.0 {
+            continue;
+        }
+        eprintln!(
+            "[quality] sentence {index}: {} {:.2}x the tolerance, redoing",
+            best.why, best.score
+        );
+        let mut best = best;
         let raw_best = raw_dir.join(format!("sent-{index:04}.wav"));
-        let trim_best = voice_dir.join(format!("sent-{index:04}.wav"));
         let raw_tmp = raw_dir.join(format!(".sent-{index:04}.retry.wav"));
         let trim_tmp = voice_dir.join(format!(".sent-{index:04}.retry.wav"));
-        for attempt in 1..=RATE_TRIES {
-            synth.one(text, index, &raw_tmp)?;
+        for attempt in 1..=TAKE_TRIES {
+            synth.one(text, *index, &raw_tmp, take_seed(*index, attempt))?;
             trim(&raw_tmp, &trim_tmp)?;
-            let fresh = rate_ms(&trim_tmp, text).unwrap_or(ms);
-            let score = (fresh / median - 1.0).abs();
-            if score < best {
-                best = score;
+            let fresh = match level_fix(&trim_tmp)? {
+                Some(metrics) => quality::deviations(&metrics, units, baseline, tol),
+                None => quality::Deviation {
+                    score: f64::INFINITY,
+                    why: "unreadable",
+                },
+            };
+            if fresh.score < best.score {
+                eprintln!(
+                    "    take {attempt}: {} {:.2} (was {:.2}), kept",
+                    fresh.why, fresh.score, best.score
+                );
+                best = fresh;
                 std::fs::rename(&raw_tmp, &raw_best)?;
-                std::fs::rename(&trim_tmp, &trim_best)?;
-                eprintln!("    take {attempt}: {fresh:.0}ms/char, closer to median, kept");
+                std::fs::rename(&trim_tmp, &trimmed)?;
             } else {
-                eprintln!("    take {attempt}: {fresh:.0}ms/char, still off, dropped");
+                eprintln!(
+                    "    take {attempt}: {} {:.2} (was {:.2}), dropped",
+                    fresh.why, fresh.score, best.score
+                );
             }
             let _ = std::fs::remove_file(&raw_tmp);
             let _ = std::fs::remove_file(&trim_tmp);
-            if best <= tolerance {
+            if best.score <= 1.0 {
                 break;
             }
         }
-        if best > tolerance {
+        if best.score > 1.0 {
             eprintln!(
-                "    sentence {index} still {:.0}% off the median, kept the closest take",
-                best * 100.0
+                "    sentence {index} still {:.2}x the tolerance on {}, kept the closest take",
+                best.score, best.why
             );
         }
-        retried.push(index);
+        retried.push(*index);
     }
     Ok(retried)
 }
@@ -312,6 +512,54 @@ fn page_start_indexes(root: &Path) -> Vec<usize> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+pub fn audit(args: AuditArgs) -> Result<()> {
+    let root = args
+        .dir
+        .canonicalize()
+        .map_err(|_| anyhow!("directory not found: {}", args.dir.display()))?;
+    let lines = text::read_sentences(&root.join("speech.tts.txt"))?;
+    let mut baseline = resolve_baseline(
+        &root,
+        args.voice.as_deref(),
+        0.0,
+        0,
+        args.min_timbre,
+    )?;
+    let tol = tolerances(args.rate_tolerance, args.pitch_tolerance);
+    let (entries, outliers) = measure_all(&root, &lines, &mut baseline, &tol)?;
+    baseline.save(&root)?;
+    print_json(&json!({
+        "ok": outliers.is_empty(),
+        "sentences": entries.len(),
+        "outliers": outliers,
+        "baseline": {
+            "ref_path": baseline.ref_path,
+            "f0_hz": baseline.f0_hz.round(),
+            "timbre_floor": baseline.timbre_floor,
+            "timbre_floor_source": baseline.timbre_floor_source,
+            "rate_ms": baseline.rate_ms.round(),
+        },
+        "report": root.join("voice/quality.json").display().to_string(),
+    }));
+    if !outliers.is_empty() {
+        bail!(
+            "{} sentences are off the reference: {} — check voice/quality.json, then redo with `tts --only {} --force`",
+            outliers.len(),
+            outliers
+                .iter()
+                .map(usize::to_string)
+                .collect::<Vec<_>>()
+                .join(","),
+            outliers
+                .iter()
+                .map(usize::to_string)
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+    }
+    Ok(())
 }
 
 pub fn run(args: Args) -> Result<()> {
@@ -396,19 +644,49 @@ pub fn run(args: Args) -> Result<()> {
         }
     }
 
+    let mut baseline = resolve_baseline(
+        &root,
+        Some(&args.voice),
+        args.cfg,
+        args.steps,
+        args.min_timbre,
+    )?;
+    let tol = tolerances(args.rate_tolerance, args.pitch_tolerance);
+
     let mut redo: Vec<usize> = Vec::new();
     if !synth.is_empty() {
-        let model = Synth::load(&model_dir, &args.voice, &args, synth.len())?;
+        let model = Synth::load(&model_dir, Path::new(&baseline.ref_path), &args, synth.len())?;
         synthesize(&model, &raw_dir, &lines, &synth)?;
         for index in &trim_needs {
             let raw = raw_dir.join(format!("sent-{index:04}.wav"));
             if !raw.exists() {
                 bail!("missing synthesis output: {}", raw.display());
             }
-            trim(&raw, &voice_dir.join(format!("sent-{index:04}.wav")))?;
+            let trimmed = voice_dir.join(format!("sent-{index:04}.wav"));
+            trim(&raw, &trimmed)?;
+            level_fix(&trimmed)?;
         }
-        redo = redo_rate_outliers(&model, &root, &lines, &synth, args.rate_tolerance)?;
+        let (_, outliers) = measure_all(&root, &lines, &mut baseline, &tol)?;
+        baseline.save(&root)?;
+        // 过半句子都判离群，说明锚本身不对（音色下限、语速基准或参考音频有问题），
+        // 这时候全量重做只会白烧几小时，直接停下来让人看报告。
+        if outliers.len() * 2 > lines.len() {
+            bail!(
+                "{} of {} sentences are off the anchor — check voice/quality.json before redoing; \
+                 tune --min-timbre / --pitch-tolerance / --rate-tolerance or replace the reference audio",
+                outliers.len(),
+                lines.len()
+            );
+        }
+        let candidates: Vec<usize> = outliers
+            .iter()
+            .copied()
+            .filter(|index| synth.contains(index))
+            .collect();
+        redo = redo_outliers(&model, &root, &lines, &candidates, &baseline, &tol)?;
     }
+    let (entries, outliers) = measure_all(&root, &lines, &mut baseline, &tol)?;
+    baseline.save(&root)?;
 
     let full_path = voice_dir.join("full.wav");
     let spec = hound::WavSpec {
@@ -419,7 +697,7 @@ pub fn run(args: Args) -> Result<()> {
     };
     let mut writer = hound::WavWriter::create(&full_path, spec)
         .with_context(|| format!("cannot write {}", full_path.display()))?;
-    let mut entries: Vec<Value> = Vec::new();
+    let mut timeline: Vec<Value> = Vec::new();
     let lead_frames = SAMPLE_RATE as u64 * args.lead_in_ms / 1000;
     for _ in 0..lead_frames {
         writer.write_sample(0i16)?;
@@ -427,6 +705,9 @@ pub fn run(args: Args) -> Result<()> {
     let mut cursor: u64 = lead_frames;
     let page_starts = page_start_indexes(&root);
     let ms = |frames: u64| (frames as f64 * 1000.0 / SAMPLE_RATE as f64).round() as u64;
+    let quality_of = |index: usize| -> Option<&Value> {
+        entries.iter().find(|entry| entry["index"] == json!(index))
+    };
 
     for (pos, (src, line)) in source.iter().zip(&lines).enumerate() {
         let index = src.index;
@@ -461,7 +742,7 @@ pub fn run(args: Args) -> Result<()> {
             }
             cursor += silence;
         }
-        entries.push(json!({
+        timeline.push(json!({
             "index": index,
             "paragraph": src.paragraph,
             "text": src.text,
@@ -477,6 +758,7 @@ pub fn run(args: Args) -> Result<()> {
             "raw": format!("voice/raw/sent-{index:04}.wav"),
             "file": format!("voice/sent-{index:04}.wav"),
             "duration_ms": end_ms - start_ms,
+            "loudness_db": quality_of(index).map(|entry| entry["loudness_db"].clone()),
         });
     }
     let tail_frames = SAMPLE_RATE as u64 * args.tail_ms / 1000;
@@ -489,14 +771,15 @@ pub fn run(args: Args) -> Result<()> {
     let total_ms = ms(cursor);
     write_json(
         &voice_dir.join("timeline.json"),
-        &json!({ "sample_rate": SAMPLE_RATE, "sentences": entries, "total_ms": total_ms }),
+        &json!({ "sample_rate": SAMPLE_RATE, "sentences": timeline, "total_ms": total_ms }),
     )?;
     manifest["voice"] = json!(args.voice.display().to_string());
+    manifest["reference"] = json!(baseline.ref_path);
     manifest["model_dir"] = json!(model_dir.display().to_string());
     write_json(&manifest_path, &manifest)?;
 
     let mut srt = String::new();
-    for entry in &entries {
+    for entry in &timeline {
         srt.push_str(&format!(
             "{}\n{} --> {}\n{}\n\n",
             entry["index"],
@@ -513,10 +796,12 @@ pub fn run(args: Args) -> Result<()> {
 
     text::print_json(&json!({
         "ok": true,
-        "sentences": entries.len(),
+        "sentences": timeline.len(),
         "synthesized": synth,
         "trimmed": trim_needs,
-        "rate_retried": redo,
+        "quality_retried": redo,
+        "quality_outliers": outliers,
+        "reference": baseline.ref_path,
         "full": full_path.display().to_string(),
         "lead_in_ms": args.lead_in_ms,
         "tail_ms": args.tail_ms,

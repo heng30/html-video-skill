@@ -4,4 +4,4 @@ pub mod local_dit;
 pub mod unified_cfm;
 
 pub use local_dit::{SinusoidalPosEmb, TimestepEmbedding, VoxCpmLocDiTV2};
-pub use unified_cfm::UnifiedCfm;
+pub use unified_cfm::{UnifiedCfm, set_seed};

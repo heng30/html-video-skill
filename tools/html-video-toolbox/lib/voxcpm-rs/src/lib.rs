@@ -54,6 +54,7 @@ pub use config::{
     VoxCpmDitConfig, VoxCpmEncoderConfig,
 };
 pub use error::{Error, Result};
+pub use locdit::set_seed;
 pub use voxcpm2::{
     CancelToken, GenerateOptions, GenerateOptionsBuilder, GenerateStream, Prompt, PromptAudio,
     VoxCPM,

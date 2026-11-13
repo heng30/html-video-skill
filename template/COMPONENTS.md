@@ -14,6 +14,8 @@ template/
     ├── stats.html         数字组（可接图表）
     ├── chart.html         条形图
     ├── rows.html          行列表
+    ├── table.html         数据表格
+    ├── callout.html       注意框
     ├── compare.html       两栏/三栏对照
     ├── quote.html         引语
     ├── image.html         图文
@@ -34,6 +36,8 @@ template/
 | `.kicker` / `h2` / `.dek` | 标题区 | kicker 是栏目，h2 是主张，dek 是一到两句上下文 |
 | `.foot` | 页脚 | 左：本页结论；右：`.en` 来源/关键词。两边都不能空 |
 | `.hl` | 关键高亮 | 包住本页最关键的数字、结论、术语，用品牌色（信号橙）突出；每页 1–3 处，不满天飞 |
+| `.table` | 数据表格 | 表头 8px 等宽 + 墨线下边；行间 hairline，最后一行不带走线（页脚收底）；要选的行加 `tr class="best"`，只用品牌色和字重，不加底色 |
+| `.callout` | 注意框 | 左 2px 品牌色线 + 极淡同色底，一段话；一页最多一个，放正文区最后 |
 
 字号（960 画框，截图 2x）：`h1` 48px、`h2` 33px、`h2.big` 44px、`.dek` 12px、正文 12px、`.foot` 10.5px、`.note` 9px、等宽标签 8–9px。正文不小于 11px。
 
@@ -46,6 +50,8 @@ template/
 | `stats.html` | 3–4 个同口径数字，下方接图表填满下半屏 | 没有可核验数据时 |
 | `chart.html` | 前后对比、数量级对比的条形图，突出条加 `bar hot` 用品牌色 | 没有数据、或数据口径不一致时 |
 | `rows.html` | 4–5 条并列要点 | 超过 5 条（拆页）、纯流程（用 steps） |
+| `table.html` | 三到四个方案按同一组维度横向对比 | 只有一条数据（用 stats）、超过 5 行（拆页或改 rows） |
+| `callout.html` | 补一句差别/边界/前提，作为整页落点 | 当正文用（塞两段以上）、或一页放两个 |
 | `compare.html` | 两种方案、前后变化、得失 | 一边讲优点一边讲缺点 |
 | `quote.html` | 幕间、可查证的引语 | 伪造名人名言 |
 | `image.html` | 原文确有配图 | 图与论点无关、或一页塞两张 |
@@ -54,7 +60,7 @@ template/
 | `code-image.html` | 代码 + 它画出来的东西（渲染结果、截图、输出） | 图和代码没有直接因果关系 |
 | `closing.html` | 最后一页，结论 + 边界 | 引入新论据、写“谢谢观看” |
 
-固定页脚：第一页用 `cover`，最后一页用 `closing`，中间 6–12 页从 `thesis / stats / chart / rows / compare / quote / image / steps / code / code-image` 里选。整篇 8–14 页。
+固定页脚：第一页用 `cover`，最后一页用 `closing`，中间 6–12 页从 `thesis / stats / chart / rows / table / callout / compare / quote / image / steps / code / code-image` 里选。整篇 8–14 页。
 
 ## 字段速查
 
@@ -62,6 +68,8 @@ template/
 - `thesis`：`h2.big`（一句话，最多两行）、`.dek`（为什么成立）
 - `stats`：`.stat b`（数字，可用 `<span class="arrow">→</span>`）、`.stat span`（口径/样本量）、`.note`（来源）；一页最多一个数字用 `.signal`
 - `rows`：`.row .key`（序号）、`.nm`（主标）、`.ds`（一句解释，≤40 字）
+- `table`：`th`（维度名，2–4 列，第一列是被比较对象）、`td`（同一维度的事实）、`tr class="best"`（本页要选的那行）
+- `callout`：`b`（引子，如“关键差别：”）、后面一句完整的话；可与 `table` / `rows` 同页组合
 - `compare`：`.col h3`（栏标题）、`.big`（数字/短结论）、`p`（同维度事实）、`.note`（限定）
 - `quote`：`.quote-text`（原文引语）、`.quote-cn`（翻译/解读）、`.quote-side`（作者 · 标题 · 年份）
 - `image`：`.text p`（≤2 段）、`img src="images/img-XX.jpg"`、`figcaption`（内容 + 来源）；正文区自动铺满，图随剩余高度伸缩

@@ -28,7 +28,7 @@ disable-model-invocation: true
 | `speech` | `speech.txt`、`slides/pages.json` | agent（分句）+ `pages` |
 | `review-speech` | 无（人工断点） | 人 |
 | `tts-text` | `speech.tts.txt` | agent（LLM 转口语稿 + 数字读法二次检查 + 多音字同音替换），替换表交人工核对后才 `state done` |
-| `tts` | `voice/`、`subs/final.srt`、`voice/asr.json` | `tts` + `asr`（逐句回听校验） |
+| `tts` | `voice/`、`subs/final.srt`、`voice/asr.json` | `tts`（合成 + 体检重做）+ `asr`（逐句回听校验） |
 | `compose` | `final.mp4`、`final.srt` | `compose`（ffmpeg） |
 | `verify` | 无（验收报告） | `verify` |
 
@@ -52,6 +52,9 @@ disable-model-invocation: true
 │   ├── raw/               # 模型原始输出 sent-0001.wav
 │   ├── sent-0001.wav      # 裁剪静默后
 │   ├── full.wav           # 拼接整轨
+│   ├── baseline.json      # 体检锚：参考音频的音色/音高 + 本批语速中位数
+│   ├── quality.json       # 逐句体检报告：响度 / 音高 / 音色相似度 / 偏差倍数
+│   ├── ref.wav            # 参考音频标准化后（裁静音 + 响度对齐），克隆条件用它
 │   ├── timeline.json      # 每句起止时间
 │   ├── manifest.json      # 每条语音对应的原文 + 配音稿
 │   ├── asr.json           # 逐句转录结果：原文 / 转录 / 相似度 / 是否通过
@@ -90,6 +93,7 @@ ls $HV
 - 字体：`$SKILL/assets/fonts/` 内置 Noto Sans CJK SC / Mono / Serif，生成 deck 时复制到 `<slug>/fonts/`；缺失时回落系统字体，不阻断。
 - 音色：`$SKILL/assets/cloned-voice.wav` 必须存在，**缺失就停**，提示用户补充后继续。
   `assets/cloned-voice.txt` 是对应参考文本，只供人工核对，VoxCPM2 不读取。
+  换音色直接换这个文件（或 `--voice` 指到别处），静音裁剪与响度对齐由 `tts` 每次开跑自动做。
 - TTS 模型：默认 `~/models/VoxCPM2`，可用 `--model-dir` 或 `VOXCPM_MODEL_DIR` 覆盖。
 - 回听模型（Fun-ASR-Nano，candle）：默认 `~/models/Fun-ASR-Nano-2512`，可用 `--model-dir` 或 `FUNASR_MODEL_DIR` 覆盖。`$HV` 内置该模型代码（`lib/fun-ast-nano`），缺失权重就直接报错，**不要拿别的 ASR 顶替**。
 - 路径优先级统一为：命令行参数 > 环境变量 > 默认。
@@ -315,6 +319,7 @@ $HV state done <slug> review-speech
 | 函数名 / 变量名 / 驼峰名（带缩写） | **先还原缩写原词，再按单词、驼峰、连字符拆开** | `getCfg` → `get config`；`parseReqBody` → `parse request body`；`initDB` → `initialize D B`；`useMemo` → `use memo`；`srcDir` → `source directory`；`VoidZero` → `void zero`；`napi-rs` → `N API RS` |
 
 - 缩写还原靠猜：`cfg` config、`req` request、`res` response、`ctx` context、`fn` function、`impl` implementation、`msg` message、`err` error、`arg` argument、`idx` index、`len` length、`init` initialize、`tmp` temporary、`str` string、`num` number、`env` environment、`dir` directory、`pkg` package、`repo` repository、`lib` library、`deps` dependencies、`auth` authentication。猜不准就按音节拆开写（`nginx` → `engine x`)，不要留一坨驼峰让 TTS 自己拼。
+- 带符号的语言名按中文习惯写：`C++` → `C加加`、`C#` → `C sharp`；不要写 `C plus plus`，TTS 念得很怪。
 - 专有名同样先拆再考虑音译：`VoidZero` → `void zero`、`napi-rs` → `N API RS`、`oxc` → `O X C`、`ts.Transformer` → `T S transformer`。拆完还读不准，才按 §7 换成中文音译。
 
 **写完必须做一次二次检查（这一条不能省）：** 把 `speech.txt` 和 `speech.tts.txt` 并排逐行读，**只看带数字和英文的行**：数字每处过三问——① 它在这里是数量、序数还是编号/年份，读法选对了吗？② 位数丢了吗（有零位没读「零」）？③ 量词、单位、万/亿还挂着吗？英文每处过一句——大写转小写了吗、缩写展开成原词了吗、只能逐字母的有没有写开（`JSON` / `APP` / `RAM` 这类能拼成词的缩写不拆）？
@@ -335,11 +340,12 @@ $HV state done <slug> review-speech
 | `重新` / `重复` / `重做` | chóng | zhòng | `虫新` / `虫复` / `虫做` |
 | `去重` | chóng | zhòng | `去虫` |
 | `行业` / `银行` / `一行代码` / `多行` | háng | xíng | `航业` / `银航` / `一航代码` / `多航` |
-| `还是` / `还得` | hái | huán | `孩是` / `孩得` |
 | `数一下` / `数数` | shǔ | shù | `属一下` / `属属` |
 | `钉住` / `钉到` | dìng | dīng | `定住` / `定到` |
 | `长大` / `增长` | zhǎng | cháng | `掌大` / `增掌` |
 | `了解` / `了结` | liǎo | le | 没有合适的同音字：回改 `speech.txt` 前先问用户 |
+
+`还`（hái / huán）不在表里：TTS 读它很稳，不要替换，也别写成 `孩`。
 
 - 一次只改多音字那几个字，**不要整篇重写**（会破坏与 `speech.txt` 的行对齐）；行数、顺序、空行一律不动。
 - 自查要**逐行通读**找歧义点，不是拿上面的表去搜关键词：表里没有的词一样会读错。改完对着改后那句念一遍，问自己「还是原来那个音、原来那个意思吗」。
@@ -377,7 +383,19 @@ $HV tts <slug> --gpu --voice $SKILL/assets/cloned-voice.wav
 
 **开跑前必须确认 `slides/pages.json` 是最新的**：页间 800ms 静默的位置由它决定（不是 `speech.txt` 的段落）。`$HV pages` 必须在最终版 `speech.txt` 定稿后跑过，`pages.json` 最后一条的 `to` 要等于句子总数。`pages.json` 比 `speech.txt` 旧，800ms 就会落在错的句子上，`compose` 时翻页音效会叠进人声。
 
-可选：`--model-dir <dir>`、`--force`（全量重合成）、`--only 1,3,5`（只处理这几句）、`--retry`（只重合成 `voice/asr-retry.json` 里的句子）、`--cfg` / `--steps` / `--max-len`（生成参数）、`--rate-tolerance`（语速离群重做阈值，默认 0.25，0 关闭）。工具一次加载模型，逐句合成，裁剪每句首尾静默（句首 ≤50ms、句尾 ≤120ms，-40dB），合成后按**每单位时长**中位数把语速偏离超过阈值的句子换噪声重做（最多 2 次，只留更接近中位的一次），按句间 250ms、段间 400ms、页间 800ms（给翻页音效留静默）拼接，音轨首尾各留静默（`--lead-in-ms` 默认 400、`--tail-ms` 默认 600，成片开场与结尾都先静一拍），写出 `voice/full.wav`、`voice/timeline.json`、`voice/manifest.json`、`subs/final.srt`。
+可选：`--model-dir <dir>`、`--force`（全量重合成）、`--only 1,3,5`（只处理这几句）、`--retry`（只重合成 `voice/asr-retry.json` 里的句子）、`--cfg` / `--steps` / `--max-len`（生成参数）、`--rate-tolerance`（语速离群阈值，默认 0.25）、`--pitch-tolerance`（音高偏离参考音频的阈值，默认 0.15）、`--min-timbre`（音色相似度下限，默认 0 表示按参考音频自标定）。工具一次加载模型，逐句合成，裁剪每句首尾静默（句首 ≤50ms、句尾 ≤120ms，-40dB），按句间 250ms、段间 400ms、页间 800ms（给翻页音效留静默）拼接，音轨首尾各留静默（`--lead-in-ms` 默认 400、`--tail-ms` 默认 600，成片开场与结尾都先静一拍），写出 `voice/full.wav`、`voice/timeline.json`、`voice/manifest.json`、`subs/final.srt`。
+
+**每句合成后会做三件事，顺序不能反：**
+
+1. **参考音频标准化**（每次开跑做一次）：`--voice` 指向的克隆音频裁静音 + 响度对齐后写成 `voice/ref.wav`，模型克隆条件用 `ref.wav` 而不是原始文件——原始文件里的静音结构和电平会进条件里，音色漂移跟着变大。**每次开跑都重做**，换音色时不用记得先手工处理一遍，任意格式/采样率/位深的输入都行（ffmpeg 解码）。
+2. **响度归一**：每句拉到 -20dB（有声帧均方电平），增益钳在 ±9dB、峰值压到 -1dBFS 以下。**音量问题不靠重合成解决**，但需要补超过 9dB 的句子说明这个 take 本身就是坏的（闷、破、几乎没声），会转给第 3 步重做。
+3. **逐句体检 + 离群重做**：拿 `voice/baseline.json` 的锚（参考音频的音色指纹与音高、本批语速中位数）比四个指标——音色余弦相似度、基频中位数、有声时长/语速单位、响度——偏差超过阈值就换种子重做，最多 2 次，只留偏差最小的一次。结果写 `voice/quality.json`。
+
+- **语速用有声时长算**（跳过句内停顿），不是文件总长：逗号停顿多的句子不会被误判成"读慢了"。少于 10 个语速单位的句子不参与语速统计和判定。
+- **锚是自标定的**：把参考音频切段，量"短段 vs 整段"的音色相似度分布，取 20 分位当下限（钳在 0.80–0.95）。换音色、换参考音频都不用调参。
+- **种子固定**：第 N 句第 K 个 take 的噪声种子是确定的，重做可复现，`voice/quality.json` 里的数字和音频对得上。
+- **过半句子被判离群会直接停下**，不再全量重做：那说明锚不对（音色下限太高、语速基准异常或参考音频不合格）。先看 `voice/quality.json` 的 `timbre_sim` 列调 `--min-timbre`，或换参考音频。
+- 音色漂移、语速、音量的**判定与重做都在 `tts` 里完成**，不需要人耳先听一遍再返工。
 
 **语速单位：一个汉字 = 一个英文单词 = 1**（`O X C` 算 3，`napi-rs` 算 2）。不要按字符数算：`VoidZero` 逐字符是 8 个字，一句里带几个英文标识符就会被判成语速异常，白白重合成半天。
 
@@ -424,6 +442,20 @@ $HV asr <slug> --accept 11,22     # 只接受这几句，其余仍按相似度�
 - 反复仍不过才用 `--min-similarity` 放宽；不要直接 `state done tts` 蒙过去。
 - 只有 `asr` 全绿（或剩下的句子全部 `--accept` 过、或人工逐条听过 `voice/bad/`）才能继续。
 
+**合成完还要体检一遍，确认音色/音高/语速没有离群：**
+
+```bash
+$HV tts-audit <slug> --voice $SKILL/assets/cloned-voice.wav
+```
+
+只读体检，不改音频：逐句算响度、基频中位数、音色相似度、有声语速，和 `voice/baseline.json` 的锚比，写 `voice/quality.json`（每句 `timbre_sim` / `f0_hz` / `loudness_db` / `score` / `worst`）。有离群句就以非零退出并列出句号。
+
+- `tts` 自己已经会重做离群句，`tts-audit` 是**最后一道确认**（尤其 `--only` / `--retry` 单句跑完之后）。
+- 离群句用 `$HV tts <slug> --only <句号> --force` 重做，再 `tts-audit` 复查。
+- `--pitch-tolerance`（默认 0.15）、`--rate-tolerance`（默认 0.25）放宽判定；`--min-timbre` 直接指定音色相似度下限。
+- **整批都离群先别重做**：看 `quality.json` 里 `timbre_sim` 的分布，合成音频相对参考音频本来就比"参考 vs 参考"低一截，下限标太严会全军覆没——这时按实际分布调 `--min-timbre`，而不是挨句返工。
+- 听感上确实没问题、但分数不过的句子，按 `--min-timbre` 调低阈值并记在报告里；**不要直接跳过 `tts-audit`**。
+
 `$HV state done <slug> tts`
 
 ## 8 · compose
@@ -442,7 +474,7 @@ $HV compose <slug>
 $HV verify <slug>
 ```
 
-必须 `ok: true`。硬检查：页覆盖完整、字幕条数与句子数一致且文本等于 `speech.txt`、音轨与成片时长差 < 0.5s。逐句语速异常（同样按「一个汉字 = 一个英文单词 = 1」算，0.08–0.60 秒/单位）只进 `warnings`，不阻断。
+必须 `ok: true`。硬检查：页覆盖完整、字幕条数与句子数一致且文本等于 `speech.txt`、音轨与成片时长差 < 0.5s。逐句语速异常（同样按「一个汉字 = 一个英文单词 = 1」算，0.08–0.60 秒/单位）和 `voice/quality.json` 里的体检离群只进 `warnings`，不阻断——阻断发生在 `tts` / `tts-audit`。
 
 `$HV state done <slug> verify`
 
@@ -458,7 +490,7 @@ $HV verify <slug>
 - 审核过的 `script.md` / `speech.txt` 是只读的：不许为了让校验变绿而重新断行、补标点、改语序。要动手只能改用户没审的下游（`speech.tts.txt`、`index.html`、`cover.html`），`speech.tts.txt` 与 `pages.json` 必须按审核版重新生成。
 - 页时间只能落在句边界上，不按字数估算。
 - 成片不烧字幕；`final.srt` 是给用户后期用的，不要在 ffmpeg 里加 `subtitles`。
-- 每句合成音频都要过 `$HV asr` 回听校验；重查只带 `--only` 跑出问题的那几句；`voice/asr-retry.json` 非空就不许 `state done tts`、不许 `compose`。英文标识符转录对不上属 ASR 缺陷，用 `--accept` 划掉，**不重合成、不改中文音译**。
+- 每句合成音频都要过 `$HV asr` 回听校验，并过 `$HV tts-audit` 体检（音色/音高/语速/响度）；重查只带 `--only` 跑出问题的那几句；`voice/asr-retry.json` 非空就不许 `state done tts`、不许 `compose`。英文标识符转录对不上属 ASR 缺陷，用 `--accept` 划掉，**不重合成、不改中文音译**。
 - `voice/bad/` 里的存档是排错证据，校验通过也不删。
 - 截图只走 `$HV screenshot`，不许换浏览器、不许用 playwright 兜底。
 - 截图后必须逐张看图确认高亮颜色与布局；有不合格的就改 `index.html` 重截，不许直接进 `script`。

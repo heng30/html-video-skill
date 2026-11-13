@@ -2,6 +2,7 @@ mod asr;
 mod check;
 mod compose;
 mod pages;
+mod quality;
 mod screenshot;
 mod selftest;
 mod state;
@@ -39,6 +40,8 @@ enum Command {
     Tts(tts::Args),
     /// transcribe voice/*.wav and compare with speech.tts.txt
     Asr(asr::Args),
+    /// re-measure voice/*.wav against the reference anchor, audio untouched
+    TtsAudit(tts::AuditArgs),
     /// slides + audio -> final.mp4 without subtitles
     Compose(compose::Args),
     /// final video acceptance
@@ -57,6 +60,7 @@ fn main() {
         Command::Pages(args) => pages::run(args),
         Command::Tts(args) => tts::run(args),
         Command::Asr(args) => asr::run(args),
+        Command::TtsAudit(args) => tts::audit(args),
         Command::Compose(args) => compose::run(args),
         Command::Verify(args) => verify::run(args),
         Command::Selftest => selftest::run(),

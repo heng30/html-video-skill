@@ -102,6 +102,7 @@ clap.workspace = true
 burn.workspace = true
 hound.workspace = true
 regex.workspace = true
+realfft.workspace = true
 tokio.workspace = true
 anyhow.workspace = true
 base64.workspace = true

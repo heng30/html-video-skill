@@ -23,6 +23,7 @@ memmap2.workspace = true
 bytemuck.workspace = true
 safetensors.workspace = true
 log.workspace = true
+rand.workspace = true
 burn.workspace = true
 symphonia.workspace = true
 thiserror.workspace = true

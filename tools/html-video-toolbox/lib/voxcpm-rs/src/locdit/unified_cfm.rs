@@ -3,6 +3,37 @@
 use crate::locdit::local_dit::VoxCpmLocDiTV2;
 use burn::prelude::*;
 use burn::tensor::TensorData;
+use rand::prelude::*;
+use std::sync::{Mutex, OnceLock};
+
+/// 固定采样噪声后 `generate` 才可复现：每次调用前 `set_seed(Some(s))`。
+/// `None` 表示用后端 RNG（默认行为）。
+static SEEDED_RNG: OnceLock<Mutex<Option<rand::rngs::StdRng>>> = OnceLock::new();
+
+pub fn set_seed(seed: Option<u64>) {
+    let cell = SEEDED_RNG.get_or_init(|| Mutex::new(None));
+    let mut slot = cell.lock().unwrap_or_else(|poison| poison.into_inner());
+    *slot = seed.map(rand::rngs::StdRng::seed_from_u64);
+}
+
+/// 有种子就从它取噪声，没有返回 `None` 让调用方走后端 RNG。
+fn seeded_normal(count: usize) -> Option<Vec<f32>> {
+    let cell = SEEDED_RNG.get()?;
+    let mut slot = cell.lock().unwrap_or_else(|poison| poison.into_inner());
+    let rng = slot.as_mut()?;
+    let mut out = Vec::with_capacity(count);
+    while out.len() < count {
+        let u1: f64 = rng.random::<f64>().max(1e-12);
+        let u2: f64 = rng.random::<f64>();
+        let radius = (-2.0 * u1.ln()).sqrt();
+        let angle = std::f64::consts::TAU * u2;
+        out.push((radius * angle.cos()) as f32);
+        if out.len() < count {
+            out.push((radius * angle.sin()) as f32);
+        }
+    }
+    Some(out)
+}
 
 #[derive(Module, Debug)]
 pub struct UnifiedCfm {
@@ -47,12 +78,21 @@ impl UnifiedCfm {
         let z = if std::env::var("VOXCPM_Z_ZERO").is_ok() {
             Tensor::<3>::zeros([b, self.in_channels, patch_size], &device)
         } else {
-            Tensor::<3>::random(
-                [b, self.in_channels, patch_size],
-                burn::tensor::Distribution::Normal(0.0, 1.0),
-                &device,
-            )
-            .mul_scalar(temperature)
+            let noise = seeded_normal(b * self.in_channels * patch_size).map(|values| {
+                Tensor::<3>::from_data(
+                    TensorData::new(values, [b, self.in_channels, patch_size]),
+                    &device,
+                )
+            });
+            let z = match noise {
+                Some(z) => z,
+                None => Tensor::<3>::random(
+                    [b, self.in_channels, patch_size],
+                    burn::tensor::Distribution::Normal(0.0, 1.0),
+                    &device,
+                ),
+            };
+            z.mul_scalar(temperature)
         };
 
         let n = n_timesteps + 1;
