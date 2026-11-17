@@ -28,6 +28,9 @@ pub struct Args {
     /// voice clone reference audio
     #[arg(long, env = "VOICE_CLONE_WAV")]
     pub voice: PathBuf,
+    /// 参考音频的转录文本；每句都拿它和参考音频一起当续写材料
+    #[arg(long)]
+    pub voice_text: Option<PathBuf>,
     /// VoxCPM2 model directory (with config.json)
     #[arg(long, env = "VOXCPM_MODEL_DIR")]
     pub model_dir: Option<PathBuf>,
@@ -35,6 +38,7 @@ pub struct Args {
     pub cfg: f32,
     #[arg(long, default_value_t = 10)]
     pub steps: usize,
+    /// 每句的 token 上限：按字数估算后钳到这里（wayshot 的 max_token_count）
     #[arg(long, default_value_t = 2000)]
     pub max_len: usize,
     /// re-synthesize everything
@@ -118,15 +122,43 @@ fn review_passed(root: &Path) -> Result<bool> {
     Ok(data["steps"]["review-speech"]["status"].as_str() == Some("done"))
 }
 
-/// 已加载的克隆模型：一次加载，反复单句合成。
+/// 参考材料：参考音频当无转录的音色前缀，同一段音频带上转录当续写前缀。
+/// 没有转录就只能做纯 `Reference` 克隆，模型读不到「这段音频说了什么」。
+fn prompt_for(reference: &Path, transcript: Option<&str>) -> Prompt {
+    let audio = || PromptAudio::File(reference.to_path_buf());
+    match transcript {
+        Some(text) => Prompt::Combined {
+            reference_audio: audio(),
+            prompt_audio: audio(),
+            prompt_text: text.to_string(),
+        },
+        None => Prompt::Reference { audio: audio() },
+    }
+}
+
+/// 每字符约 0.3s 语音、每个 latent patch 约 80ms，再留 50% 余量（wayshot 的估算）。
+fn estimated_max_len(text: &str, cap: usize) -> usize {
+    ((text.chars().count().max(1) as f32 * 4.0 * 1.5) as usize).clamp(50, cap)
+}
+
+/// 已加载的克隆模型：一次加载，逐句合成。
 struct Synth {
     model: VoxCPM,
-    options: GenerateOptions,
-    sample_rate: u32,
+    reference: PathBuf,
+    transcript: Option<String>,
+    cfg: f32,
+    steps: usize,
+    max_len: usize,
 }
 
 impl Synth {
-    fn load(model_dir: &Path, reference: &Path, args: &Args, count: usize) -> Result<Self> {
+    fn load(
+        model_dir: &Path,
+        reference: &Path,
+        transcript: Option<String>,
+        args: &Args,
+        count: usize,
+    ) -> Result<Self> {
         eprintln!(
             "loading model {} on {} ({count} sentences to synthesize)",
             model_dir.display(),
@@ -139,37 +171,42 @@ impl Synth {
         };
         let model = VoxCPM::from_local(model_dir, &device)
             .map_err(|e| anyhow!("model load failed: {e}"))?;
-        let sample_rate = model.sample_rate();
-        let options = GenerateOptions {
-            cfg_value: args.cfg,
-            inference_timesteps: args.steps,
-            max_len: args.max_len,
-            prompt: Prompt::Reference {
-                audio: PromptAudio::File(reference.to_path_buf()),
+        if model.sample_rate() != SAMPLE_RATE {
+            bail!(
+                "model sample rate {} is not {SAMPLE_RATE}: {}",
+                model.sample_rate(),
+                model_dir.display()
+            );
+        }
+        eprintln!(
+            "cloning from {} ({})",
+            reference.display(),
+            match &transcript {
+                Some(text) => format!("transcript: {text}"),
+                None => "no transcript, voice only".to_string(),
             },
-            ..Default::default()
-        };
+        );
         Ok(Self {
             model,
-            options,
-            sample_rate,
+            reference: reference.to_path_buf(),
+            transcript,
+            cfg: args.cfg,
+            steps: args.steps,
+            max_len: args.max_len,
         })
     }
 
-    /// 同一个 `seed` + 同一句 → 同一段音频，重做可复现、可事后比对。
-    fn one(&self, text: &str, index: usize, path: &Path, seed: u64) -> Result<()> {
-        voxcpm_rs::set_seed(Some(seed));
-        let samples = self
-            .model
-            .generate(text, self.options.clone())
-            .map_err(|e| anyhow!("sentence {index} synthesis failed: {e}"))?;
-        voxcpm_rs::audio::write_wav(path, &samples, self.sample_rate)
-            .map_err(|e| anyhow!("write failed {}: {e}", path.display()))
+    fn generate(&self, text: &str) -> Result<Vec<f32>> {
+        let options = GenerateOptions::builder()
+            .timesteps(self.steps)
+            .cfg(self.cfg)
+            .max_len(estimated_max_len(text, self.max_len))
+            .prompt(prompt_for(&self.reference, self.transcript.as_deref()))
+            .build();
+        self.model
+            .generate(text, options)
+            .map_err(|e| anyhow!("synthesis failed ({text}): {e}"))
     }
-}
-
-fn take_seed(index: usize, attempt: usize) -> u64 {
-    0x5eed_0000 ^ ((index as u64) << 8) ^ attempt as u64
 }
 
 fn synthesize(
@@ -185,14 +222,39 @@ fn synthesize(
             done + 1,
             wanted.len()
         );
-        synth.one(
-            sentence,
-            *index,
-            &raw_dir.join(format!("sent-{index:04}.wav")),
-            take_seed(*index, 0),
-        )?;
+        let samples = synth.generate(sentence)?;
+        write_wav(&raw_dir.join(format!("sent-{index:04}.wav")), &samples)?;
     }
     Ok(())
+}
+
+/// wayshot 的落盘格式：48k / 单声道 / 32-bit float，样本原样写入不做抖动。
+fn write_wav(path: &Path, samples: &[f32]) -> Result<()> {
+    let spec = hound::WavSpec {
+        channels: 1,
+        sample_rate: SAMPLE_RATE,
+        bits_per_sample: 32,
+        sample_format: hound::SampleFormat::Float,
+    };
+    let mut writer = hound::WavWriter::create(path, spec)
+        .with_context(|| format!("cannot write {}", path.display()))?;
+    for sample in samples {
+        writer.write_sample(*sample)?;
+    }
+    writer.finalize()?;
+    Ok(())
+}
+
+/// 参考音频的转录；没给、或文件只有空白，就当没给（退回纯音色克隆）。
+fn read_transcript(path: Option<&Path>) -> Result<Option<String>> {
+    let Some(path) = path else {
+        return Ok(None);
+    };
+    let text = std::fs::read_to_string(path)
+        .with_context(|| format!("cannot read {}", path.display()))?
+        .trim()
+        .to_string();
+    Ok((!text.is_empty()).then_some(text))
 }
 
 fn rewrite(path: &Path, samples: &[i16], rate: u32) -> Result<()> {
@@ -370,7 +432,7 @@ fn measure_all(
     Ok((entries, outliers))
 }
 
-/// 离群的句子换种子重做，只留偏差最小的一次（原文件一直在盘上，更差的直接丢）。
+/// 离群的句子换个 take 重做，只留偏差最小的一次（原文件一直在盘上，更差的直接丢）。
 /// 返回真正重做过的句子编号。
 fn redo_outliers(
     synth: &Synth,
@@ -406,7 +468,8 @@ fn redo_outliers(
         let raw_tmp = raw_dir.join(format!(".sent-{index:04}.retry.wav"));
         let trim_tmp = voice_dir.join(format!(".sent-{index:04}.retry.wav"));
         for attempt in 1..=TAKE_TRIES {
-            synth.one(text, *index, &raw_tmp, take_seed(*index, attempt))?;
+            let samples = synth.generate(text)?;
+            write_wav(&raw_tmp, &samples)?;
             trim(&raw_tmp, &trim_tmp)?;
             let fresh = match level_fix(&trim_tmp)? {
                 Some(metrics) => quality::deviations(&metrics, units, baseline, tol),
@@ -594,6 +657,7 @@ pub fn run(args: Args) -> Result<()> {
             args.voice.display()
         );
     }
+    let transcript = read_transcript(args.voice_text.as_deref())?;
     let model_dir = resolve_model_dir(args.model_dir.clone())?;
     if !model_dir.join("config.json").is_file() {
         bail!(
@@ -655,7 +719,13 @@ pub fn run(args: Args) -> Result<()> {
 
     let mut redo: Vec<usize> = Vec::new();
     if !synth.is_empty() {
-        let model = Synth::load(&model_dir, Path::new(&baseline.ref_path), &args, synth.len())?;
+        let model = Synth::load(
+            &model_dir,
+            Path::new(&baseline.ref_path),
+            transcript,
+            &args,
+            synth.len(),
+        )?;
         synthesize(&model, &raw_dir, &lines, &synth)?;
         for index in &trim_needs {
             let raw = raw_dir.join(format!("sent-{index:04}.wav"));
@@ -809,4 +879,37 @@ pub fn run(args: Args) -> Result<()> {
         "srt": srt_path.display().to_string(),
     }));
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn transcript_turns_the_reference_into_a_continuation_prefix() {
+        let reference = Path::new("/tmp/ref.wav");
+        match prompt_for(reference, Some("飞流直下三千尺")) {
+            Prompt::Combined {
+                reference_audio,
+                prompt_audio,
+                prompt_text,
+            } => {
+                assert_eq!(prompt_text, "飞流直下三千尺");
+                assert!(matches!(reference_audio, PromptAudio::File(p) if p == reference));
+                assert!(matches!(prompt_audio, PromptAudio::File(p) if p == reference));
+            }
+            other => panic!("expected Combined, got {other:?}"),
+        }
+        assert!(matches!(
+            prompt_for(reference, None),
+            Prompt::Reference { .. }
+        ));
+    }
+
+    #[test]
+    fn max_len_scales_with_the_sentence_and_respects_the_cap() {
+        assert_eq!(estimated_max_len("一", 2000), 50);
+        assert_eq!(estimated_max_len(&"字".repeat(100), 2000), 600);
+        assert_eq!(estimated_max_len(&"字".repeat(100), 400), 400);
+    }
 }

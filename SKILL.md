@@ -92,7 +92,7 @@ ls $HV
 - 截图后端是 headless Chromium，用 `CHROME_PATH` 或 `--chrome-path` 指定；找不到会直接报错，**不要再退回 firefox / playwright 截图**。没有浏览器就先装，或者让用户提供路径。
 - 字体：`$SKILL/assets/fonts/` 内置 Noto Sans CJK SC / Mono / Serif，生成 deck 时复制到 `<slug>/fonts/`；缺失时回落系统字体，不阻断。
 - 音色：`$SKILL/assets/cloned-voice.wav` 必须存在，**缺失就停**，提示用户补充后继续。
-  `assets/cloned-voice.txt` 是对应参考文本，只供人工核对，VoxCPM2 不读取。
+  `assets/cloned-voice.txt` 是它的转录，`tts --voice-text` 会把它和参考音频一起当条件用（每一句都带）；不给就只剩纯音色克隆。
   换音色直接换这个文件（或 `--voice` 指到别处），静音裁剪与响度对齐由 `tts` 每次开跑自动做。
 - TTS 模型：默认 `~/models/VoxCPM2`，可用 `--model-dir` 或 `VOXCPM_MODEL_DIR` 覆盖。
 - 回听模型（Fun-ASR-Nano，candle）：默认 `~/models/Fun-ASR-Nano-2512`，可用 `--model-dir` 或 `FUNASR_MODEL_DIR` 覆盖。`$HV` 内置该模型代码（`lib/fun-ast-nano`），缺失权重就直接报错，**不要拿别的 ASR 顶替**。
@@ -374,7 +374,7 @@ $HV check tts-text <slug>
 ## 7 · tts
 
 ```bash
-$HV tts <slug> --gpu --voice $SKILL/assets/cloned-voice.wav
+$HV tts <slug> --gpu --voice $SKILL/assets/cloned-voice.wav --voice-text $SKILL/assets/cloned-voice.txt
 ```
 
 **必须先用 `--gpu` 跑；日志出现 wgpu 初始化/加载失败或进程报错退出时，才去掉 `--gpu` 回退 CPU 重跑同一条命令**（不加 `--gpu` 即默认 CPU `flex` 后端）。成功标志是日志出现 `loading model ... on wgpu/gpu`，随后逐句 `[N/M]`；回退 CPU 时对应 `on flex/cpu`。
@@ -383,17 +383,17 @@ $HV tts <slug> --gpu --voice $SKILL/assets/cloned-voice.wav
 
 **开跑前必须确认 `slides/pages.json` 是最新的**：页间 800ms 静默的位置由它决定（不是 `speech.txt` 的段落）。`$HV pages` 必须在最终版 `speech.txt` 定稿后跑过，`pages.json` 最后一条的 `to` 要等于句子总数。`pages.json` 比 `speech.txt` 旧，800ms 就会落在错的句子上，`compose` 时翻页音效会叠进人声。
 
-可选：`--model-dir <dir>`、`--force`（全量重合成）、`--only 1,3,5`（只处理这几句）、`--retry`（只重合成 `voice/asr-retry.json` 里的句子）、`--cfg` / `--steps` / `--max-len`（生成参数）、`--rate-tolerance`（语速离群阈值，默认 0.25）、`--pitch-tolerance`（音高偏离参考音频的阈值，默认 0.15）、`--min-timbre`（音色相似度下限，默认 0 表示按参考音频自标定）。工具一次加载模型，逐句合成，裁剪每句首尾静默（句首 ≤50ms、句尾 ≤120ms，-40dB），按句间 250ms、段间 400ms、页间 800ms（给翻页音效留静默）拼接，音轨首尾各留静默（`--lead-in-ms` 默认 400、`--tail-ms` 默认 600，成片开场与结尾都先静一拍），写出 `voice/full.wav`、`voice/timeline.json`、`voice/manifest.json`、`subs/final.srt`。
+可选：`--model-dir <dir>`、`--force`（全量重合成）、`--only 1,3,5`（只处理这几句）、`--retry`（只重合成 `voice/asr-retry.json` 里的句子）、`--cfg` / `--steps` / `--max-len`（生成参数）、`--rate-tolerance`（语速离群阈值，默认 0.25）、`--pitch-tolerance`（音高偏离参考音频的阈值，默认 0.15）、`--min-timbre`（音色相似度下限，默认 0 表示按参考音频自标定）。工具一次加载模型，逐句独立合成：每句都把 `voice/ref.wav` 当音色前缀、同一段音频配上 `--voice-text` 的转录当续写前缀（`Combined` 模式，模型因此知道这段音频说了什么）；没给 `--voice-text` 就退回纯 `Reference` 克隆。随后裁剪每句首尾静默（句首 ≤50ms、句尾 ≤120ms，-40dB），按句间 250ms、段间 400ms、页间 800ms（给翻页音效留静默）拼接，音轨首尾各留静默（`--lead-in-ms` 默认 400、`--tail-ms` 默认 600，成片开场与结尾都先静一拍），写出 `voice/full.wav`、`voice/timeline.json`、`voice/manifest.json`、`subs/final.srt`。
 
 **每句合成后会做三件事，顺序不能反：**
 
 1. **参考音频标准化**（每次开跑做一次）：`--voice` 指向的克隆音频裁静音 + 响度对齐后写成 `voice/ref.wav`，模型克隆条件用 `ref.wav` 而不是原始文件——原始文件里的静音结构和电平会进条件里，音色漂移跟着变大。**每次开跑都重做**，换音色时不用记得先手工处理一遍，任意格式/采样率/位深的输入都行（ffmpeg 解码）。
 2. **响度归一**：每句拉到 -20dB（有声帧均方电平），增益钳在 ±9dB、峰值压到 -1dBFS 以下。**音量问题不靠重合成解决**，但需要补超过 9dB 的句子说明这个 take 本身就是坏的（闷、破、几乎没声），会转给第 3 步重做。
-3. **逐句体检 + 离群重做**：拿 `voice/baseline.json` 的锚（参考音频的音色指纹与音高、本批语速中位数）比四个指标——音色余弦相似度、基频中位数、有声时长/语速单位、响度——偏差超过阈值就换种子重做，最多 2 次，只留偏差最小的一次。结果写 `voice/quality.json`。
+3. **逐句体检 + 离群重做**：拿 `voice/baseline.json` 的锚（参考音频的音色指纹与音高、本批语速中位数）比四个指标——音色余弦相似度、基频中位数、有声时长/语速单位、响度——偏差超过阈值就换一个 take 重做（重跑同一句时上下文与采样不同，结果自然不同），最多 2 次，只留偏差最小的一次。结果写 `voice/quality.json`。
 
 - **语速用有声时长算**（跳过句内停顿），不是文件总长：逗号停顿多的句子不会被误判成"读慢了"。少于 10 个语速单位的句子不参与语速统计和判定。
 - **锚是自标定的**：把参考音频切段，量"短段 vs 整段"的音色相似度分布，取 20 分位当下限（钳在 0.80–0.95）。换音色、换参考音频都不用调参。
-- **种子固定**：第 N 句第 K 个 take 的噪声种子是确定的，重做可复现，`voice/quality.json` 里的数字和音频对得上。
+- **重做不重启模型**：离群句只重合成自己，每次都用同一份参考音频 + 转录当条件（与首轮同条件），不动其它句子。
 - **过半句子被判离群会直接停下**，不再全量重做：那说明锚不对（音色下限太高、语速基准异常或参考音频不合格）。先看 `voice/quality.json` 的 `timbre_sim` 列调 `--min-timbre`，或换参考音频。
 - 音色漂移、语速、音量的**判定与重做都在 `tts` 里完成**，不需要人耳先听一遍再返工。
 
@@ -417,7 +417,7 @@ $HV asr <slug>
 - 有 `mismatched` 时命令以非零退出，接着重合成，再回听，直到全部通过：
 
 ```bash
-$HV tts <slug> --retry --voice $SKILL/assets/cloned-voice.wav
+$HV tts <slug> --retry --voice $SKILL/assets/cloned-voice.wav --voice-text $SKILL/assets/cloned-voice.txt
 $HV asr <slug> --only <刚重合成的句号>
 ```
 
