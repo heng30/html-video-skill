@@ -491,8 +491,8 @@ $HV verify <slug>
 cd <slug> && python3 - <<'EOF'
 import re
 
-FONT_SIZE = 80      # 字号
-MARGIN_V = 30       # 距底部
+FONT_SIZE = 80      # 字号，固定值，不得修改
+MARGIN_V = 30       # 距底部，固定值，不得修改
 
 src = open('final.srt', encoding='utf-8').read()
 
@@ -538,7 +538,7 @@ EOF
 ffmpeg -hide_banner -nostdin -y -i final.mp4 -vf "subtitles=final.ass:fontsdir=fonts" -c:a copy final-srt.mp4
 ```
 
-**3. 自查**：日志里找 `fontselect: (Noto Sans CJK SC, 400, 0) -> .../NotoSansCJK-VF.otf.ttc` 确认字体命中；抽 2–3 帧 `read` 看图（含一条长句帧，确认折行/边距），不合格改 `FONT_SIZE` / `MARGIN_V` 重跑。
+**3. 自查**：只在日志里找 `fontselect: (Noto Sans CJK SC, 400, 0) -> .../NotoSansCJK-VF.otf.ttc` 确认字体命中。**不要抽帧看图，不要改 `FONT_SIZE` / `MARGIN_V`**：这两个值固定，字幕压到页面元素上也不用管，精修交给剪辑器。
 
 这一步不是断点步骤，不进 `state`，`burn-subs` 重跑只花一次转码时间。
 
@@ -553,7 +553,7 @@ ffmpeg -hide_banner -nostdin -y -i final.mp4 -vf "subtitles=final.ass:fontsdir=f
 - 每个审核点结束后必须 `read` 重读被审文件，没重读就不许 `state done`、不许往下走。
 - 审核过的 `script.md` / `speech.txt` 是只读的：不许为了让校验变绿而重新断行、补标点、改语序。要动手只能改用户没审的下游（`speech.tts.txt`、`index.html`、`cover.html`），`speech.tts.txt` 与 `pages.json` 必须按审核版重新生成。
 - 页时间只能落在句边界上，不按字数估算。
-- `compose` 产物 `final.mp4` 永远不带字幕；烧字幕只发生在必做的 `burn-subs` 步（`final.srt` → `final.ass` → `final-srt.mp4`），不得在 `compose` 的 ffmpeg 里加 `subtitles`；`final.srt` 始终保留给用户后期。`verify` 过后没烧出 `final-srt.mp4`，流水线不算完。
+- `compose` 产物 `final.mp4` 永远不带字幕；烧字幕只发生在必做的 `burn-subs` 步（`final.srt` → `final.ass` → `final-srt.mp4`），不得在 `compose` 的 ffmpeg 里加 `subtitles`；`final.srt` 始终保留给用户后期。`verify` 过后没烧出 `final-srt.mp4`，流水线不算完。`burn-subs` 的 `FONT_SIZE` / `MARGIN_V` 固定为 `80` / `30`，**不许改**；烧完只查 `fontselect` 日志确认字体命中，**不抽帧看图**。
 - 每句合成音频都要过 `$HV asr` 回听校验，并过 `$HV tts-audit` 体检（音色/音高/语速/响度）；重查只带 `--only` 跑出问题的那几句；`voice/asr-retry.json` 非空就不许 `state done tts`、不许 `compose`。英文标识符转录对不上属 ASR 缺陷，用 `--accept` 划掉，**不重合成、不改中文音译**。
 - `voice/bad/` 里的存档是排错证据，校验通过也不删。
 - 截图只走 `$HV screenshot`，不许换浏览器、不许用 playwright 兜底。
