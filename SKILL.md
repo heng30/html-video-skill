@@ -1,12 +1,12 @@
 ---
 name: html-video
-description: 文章 URL → 粗剪解说视频。抓正文与配图、组件搭 slides、逐页演讲稿、分句、克隆配音、裁剪静音、合成不带字幕的 MP4。两个人审断点与断点续跑。
+description: 文章 URL → 粗剪解说视频。抓正文与配图、组件搭 slides、逐页演讲稿、分句、克隆配音、裁剪静音、合成不带字幕的 MP4，再烧出带字幕的 final-srt.mp4。两个人审断点与断点续跑。
 disable-model-invocation: true
 ---
 
 # html-video：文章 URL → 解说视频
 
-一条流水线，十步，两个人工断点。所有中间产物落盘，任何一步失败都能从断点续跑。整条流水线由一个工具包办：`$HV`（`html-video-toolbox`）的 `screenshot` / `state` / `check` / `pages` / `tts` / `asr` / `compose` / `verify` 子命令。
+一条流水线，十一步，两个人工断点。所有中间产物落盘，任何一步失败都能从断点续跑。整条流水线由一个工具包办：`$HV`（`html-video-toolbox`）的 `screenshot` / `state` / `check` / `pages` / `tts` / `asr` / `compose` / `verify` 子命令。
 
 **定位：粗剪。** 分句按语义走，不为了短视频节奏硬切；成片不烧字幕，字幕文件交给用户在剪辑器里自己合成和精修。
 
@@ -31,6 +31,7 @@ disable-model-invocation: true
 | `tts` | `voice/`、`subs/final.srt`、`voice/asr.json` | `tts`（合成 + 体检重做）+ `asr`（逐句回听校验） |
 | `compose` | `final.mp4`、`final.srt` | `compose`（ffmpeg） |
 | `verify` | 无（验收报告） | `verify` |
+| `burn-subs` | `final.ass`、`final-srt.mp4` | agent（必须，`verify` 过后必做） |
 
 ## 目录
 
@@ -63,6 +64,8 @@ disable-model-invocation: true
 ├── subs/final.srt
 ├── final.mp4
 ├── final.srt              # 外挂字幕
+├── final.ass              # 烧字幕用的带样式 ASS（burn-subs 生成）
+├── final-srt.mp4          # 烧好字幕的成片（burn-subs 产物，可选）
 └── progress.json          # 断点状态
 ```
 
@@ -383,7 +386,7 @@ $HV tts <slug> --gpu --voice $SKILL/assets/cloned-voice.wav --voice-text $SKILL/
 
 **开跑前必须确认 `slides/pages.json` 是最新的**：页间 800ms 静默的位置由它决定（不是 `speech.txt` 的段落）。`$HV pages` 必须在最终版 `speech.txt` 定稿后跑过，`pages.json` 最后一条的 `to` 要等于句子总数。`pages.json` 比 `speech.txt` 旧，800ms 就会落在错的句子上，`compose` 时翻页音效会叠进人声。
 
-可选：`--model-dir <dir>`、`--force`（全量重合成）、`--only 1,3,5`（只处理这几句）、`--retry`（只重合成 `voice/asr-retry.json` 里的句子）、`--cfg` / `--steps` / `--max-len`（生成参数）、`--rate-tolerance`（语速离群阈值，默认 0.25）、`--pitch-tolerance`（音高偏离参考音频的阈值，默认 0.15）、`--min-timbre`（音色相似度下限，默认 0 表示按参考音频自标定）。工具一次加载模型，逐句独立合成：每句都把 `voice/ref.wav` 当音色前缀、同一段音频配上 `--voice-text` 的转录当续写前缀（`Combined` 模式，模型因此知道这段音频说了什么）；没给 `--voice-text` 就退回纯 `Reference` 克隆。随后裁剪每句首尾静默（句首 ≤50ms、句尾 ≤120ms，-40dB），按句间 250ms、段间 400ms、页间 800ms（给翻页音效留静默）拼接，音轨首尾各留静默（`--lead-in-ms` 默认 400、`--tail-ms` 默认 600，成片开场与结尾都先静一拍），写出 `voice/full.wav`、`voice/timeline.json`、`voice/manifest.json`、`subs/final.srt`。
+可选：`--model-dir <dir>`、`--force`（全量重合成）、`--only 1,3,5`（只处理这几句）、`--retry`（只重合成 `voice/asr-retry.json` 里的句子）、`--cfg` / `--steps` / `--max-len`（生成参数）、`--rate-tolerance`（语速离群阈值，默认 0.25）、`--pitch-tolerance`（音高偏离参考音频的阈值，默认 0.15）、`--min-timbre`（音色相似度下限，默认 0 表示按参考音频自标定）。工具一次加载模型，逐句独立合成：每句都把 `voice/ref.wav` 当音色前缀、同一段音频配上 `--voice-text` 的转录当续写前缀（`Combined` 模式，模型因此知道这段音频说了什么）；没给 `--voice-text` 就退回纯 `Reference` 克隆。随后裁剪每句首尾静音（阈值 -50dB；句首留 ≤50ms、句尾留 0.2s——模型收尾的 -45dB 残响不能被当成静音删掉，否则句尾会硬切），按句间 250ms、段间 400ms、页间 800ms（给翻页音效留静默）拼接，音轨首尾各留静默（`--lead-in-ms` 默认 400、`--tail-ms` 默认 600，成片开场与结尾都先静一拍），写出 `voice/full.wav`、`voice/timeline.json`、`voice/manifest.json`、`subs/final.srt`。
 
 **每句合成后会做三件事，顺序不能反：**
 
@@ -478,6 +481,67 @@ $HV verify <slug>
 
 `$HV state done <slug> verify`
 
+## 10 · burn-subs（必须）
+
+`verify` 通过后**必须继续做这一步**，把 `final.srt` 烧进视频；产出独立的 `final-srt.mp4`，**不动 `final.mp4`**，`final.srt` 仍保留给剪辑器。没产出 `final-srt.mp4` 就不算整条流水线完成。
+
+**1. `final.srt` → `final.ass`**（不能直接 `subtitles=final.srt` + `force_style`：SRT 被 libass 按 384×288 的默认 PlayRes 缩放，字号和边距数值全部失真；必须落成显式 `PlayResX: 1920 / PlayResY: 1080` 的 ASS）。用 python 生成，样式硬编码：黑字、3px 白描边、`BorderStyle: 1`、`Alignment: 2`（底部居中）、左右边距 `16`、底部边距 `MarginV`、字号 `Fontsize`，折行交给 libass（`WrapStyle: 0`，放不下自动两行居中）：
+
+```bash
+cd <slug> && python3 - <<'EOF'
+import re
+
+FONT_SIZE = 80      # 字号
+MARGIN_V = 30       # 距底部
+
+src = open('final.srt', encoding='utf-8').read()
+
+def conv(t):
+    h, m, s, ms = re.match(r'(\d+):(\d+):(\d+),(\d+)', t).groups()
+    return f"{int(h)}:{int(m):02d}:{int(s):02d}.{int(ms) // 10:02d}"
+
+ev = []
+for blk in re.split(r'\n\s*\n', src.strip()):
+    lines = [l.strip() for l in blk.strip().splitlines() if l.strip()]
+    ti = next((i for i, l in enumerate(lines) if '-->' in l), None)
+    if ti is None:
+        continue
+    a, b = re.search(r'(\S+)\s*-->\s*(\S+)', lines[ti]).groups()
+    text = r'\N'.join(lines[ti + 1:]) or lines[0]
+    ev.append(f"Dialogue: 0,{conv(a)},{conv(b)},Default,,0,0,0,,{text}")
+
+header = f"""[Script Info]
+ScriptType: v4.00+
+PlayResX: 1920
+PlayResY: 1080
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+YCbCr Matrix: TV.709
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Noto Sans CJK SC,{FONT_SIZE},&H00000000,&H00000000,&H00FFFFFF,&H00000000,0,0,0,0,100,100,0,0,1,3,0,2,16,16,{MARGIN_V},1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+open('final.ass', 'w', encoding='utf-8').write(header + '\n'.join(ev) + '\n')
+print(len(ev), 'events')
+EOF
+```
+
+字体名必须用 `Noto Sans CJK SC`（`fonts/NotoSansCJK-VF.otf.ttc` 内含该 family，`fc-query` 可验证），`fontsdir` 指向 `<slug>/fonts/`，由 libass 解析，**不要依赖系统 fontconfig 命中别的字体**。
+
+**2. 烧录**（必须带 `-nostdin`，并丢后台跑——ffmpeg 在某些前端环境里前台会卡在等 stdin，后台同样命令几十秒就完）：
+
+```bash
+ffmpeg -hide_banner -nostdin -y -i final.mp4 -vf "subtitles=final.ass:fontsdir=fonts" -c:a copy final-srt.mp4
+```
+
+**3. 自查**：日志里找 `fontselect: (Noto Sans CJK SC, 400, 0) -> .../NotoSansCJK-VF.otf.ttc` 确认字体命中；抽 2–3 帧 `read` 看图（含一条长句帧，确认折行/边距），不合格改 `FONT_SIZE` / `MARGIN_V` 重跑。
+
+这一步不是断点步骤，不进 `state`，`burn-subs` 重跑只花一次转码时间。
+
 ## 硬规则
 
 - `script.md` 一页一段，页数 = slides 数；`speech.txt` 段落数 = `script.md` 页数。
@@ -489,7 +553,7 @@ $HV verify <slug>
 - 每个审核点结束后必须 `read` 重读被审文件，没重读就不许 `state done`、不许往下走。
 - 审核过的 `script.md` / `speech.txt` 是只读的：不许为了让校验变绿而重新断行、补标点、改语序。要动手只能改用户没审的下游（`speech.tts.txt`、`index.html`、`cover.html`），`speech.tts.txt` 与 `pages.json` 必须按审核版重新生成。
 - 页时间只能落在句边界上，不按字数估算。
-- 成片不烧字幕；`final.srt` 是给用户后期用的，不要在 ffmpeg 里加 `subtitles`。
+- `compose` 产物 `final.mp4` 永远不带字幕；烧字幕只发生在必做的 `burn-subs` 步（`final.srt` → `final.ass` → `final-srt.mp4`），不得在 `compose` 的 ffmpeg 里加 `subtitles`；`final.srt` 始终保留给用户后期。`verify` 过后没烧出 `final-srt.mp4`，流水线不算完。
 - 每句合成音频都要过 `$HV asr` 回听校验，并过 `$HV tts-audit` 体检（音色/音高/语速/响度）；重查只带 `--only` 跑出问题的那几句；`voice/asr-retry.json` 非空就不许 `state done tts`、不许 `compose`。英文标识符转录对不上属 ASR 缺陷，用 `--accept` 划掉，**不重合成、不改中文音译**。
 - `voice/bad/` 里的存档是排错证据，校验通过也不删。
 - 截图只走 `$HV screenshot`，不许换浏览器、不许用 playwright 兜底。
@@ -523,5 +587,8 @@ $HV verify <slug>
 | `speech.txt 段落数与 script.md 不一致` | 按页重新分句，重跑 `$HV pages` |
 | `compose` 报 `page turn ... has only 400ms of silence` | `slides/pages.json` 与 `voice/timeline.json` 不同步（通常是先 `tts` 后重跑 `pages`）。重跑 `$HV pages` → `$HV tts`（不加 `--force`，只重拼接）→ `$HV compose`；别用 `--flip-gain` 压低音效糊过去 |
 | `ffmpeg 合成失败` | 看 stderr；多半是图片路径或 concat 列表 |
+| 烧字幕时 ffmpeg 前台卡住不动 | 不是转码慢：缺 `-nostdin` 时 ffmpeg 卡在等 stdin。加 `-nostdin` 并丢 `background_bash` 重跑；同样命令后台几十秒完成 |
+| 烧字幕字号/边距离谱（巨大或贴角） | SRT 直接进 `subtitles` 滤镜时按 384×288 默认 PlayRes 缩放，`force_style` 数值失真。走 `final.srt` → `final.ass` 转换，显式写 `PlayResX: 1920` / `PlayResY: 1080` |
+| 烧出来的字幕字体不对 | 日志查 `fontselect` 行；确认 `fontsdir=fonts` 指向含 `NotoSansCJK-VF.otf.ttc` 的目录，family 名用 `Noto Sans CJK SC` |
 | `wgpu` 后端加载/初始化失败 | 去掉 `--gpu` 回退 CPU 重跑同一命令；已合成的句子不重跑 |
 | 合成太慢 | 正常：CPU 推理 4.3GB 模型；已合成的句子不会重跑 |

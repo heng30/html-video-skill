@@ -10,8 +10,10 @@ const SENTENCE_GAP_MS: u64 = 250;
 const PARAGRAPH_GAP_MS: u64 = 400;
 /// 页间静默：至少要放得下 compose 叠的翻页音效（0.55s），再给切页留点余量。
 const PAGE_GAP_MS: u64 = 800;
-const TRIM_FILTER: &str = "silenceremove=start_periods=1:start_silence=0.05:start_threshold=-40dB,\
-areverse,silenceremove=start_periods=1:start_silence=0.12:start_threshold=-40dB,areverse";
+/// 阈值压到 -50dB：模型收尾的残响在 -45dB 上下，用 -40dB 会被当成静音整段删掉，
+/// 句子末尾就变成硬切。尾部再留 0.2s，让最后一个音节的拖尾自然收住。
+const TRIM_FILTER: &str = "silenceremove=start_periods=1:start_silence=0.05:start_threshold=-50dB,\
+areverse,silenceremove=start_periods=1:start_silence=0.2:start_threshold=-50dB,areverse";
 /// 参考音频最多补/降多少 dB，避免把噪声底噪拉上来。
 const REF_MAX_GAIN_DB: f32 = 12.0;
 
